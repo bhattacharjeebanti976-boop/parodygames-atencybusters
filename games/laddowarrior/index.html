@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0f">
+<title>LadooWarrior 3D - Sand Arena Edition</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
+      -webkit-user-select: none; user-select: none; }
+  html, body { margin: 0; height: 100%; background: #0b0b0f; overflow: hidden; overscroll-behavior: none;
+      touch-action: none; font-family: Arial, Helvetica, sans-serif; color: #fff; }
+  #stage { position: fixed; inset: 0; }
+  canvas { position: absolute; left: 50%; top: 50%; background: #87ceeb; image-rendering: auto; touch-action: none; display: block; }
+  #layer { position: fixed; inset: 0; touch-action: none; z-index: 5; }
+  #back { position: fixed; z-index: 30; top: max(6px, env(safe-area-inset-top)); left: max(6px, env(safe-area-inset-left));
+      min-width: 64px; min-height: 44px; display: flex; align-items: center; justify-content: flex-start; padding: 0 10px;
+      color: #fff; opacity: .5; text-decoration: none; font-size: 14px; font-weight: bold; }
+  #back:hover, #back:active { opacity: .95; }
+  #fs { position: fixed; z-index: 30; top: max(6px, env(safe-area-inset-top)); right: max(6px, env(safe-area-inset-right));
+      width: 44px; height: 44px; border: 0; background: transparent; color: #fff; opacity: .5; font-size: 20px; cursor: pointer; }
+  #fs:hover, #fs:active { opacity: .95; }
+  #hint { position: fixed; z-index: 4; left: 50%; bottom: 6px; transform: translateX(-50%); font-size: 12px; opacity: .6;
+      pointer-events: none; text-align: center; white-space: nowrap; }
+  body.locked #hint, body.touch #hint { display: none; }
+  /* touch controls */
+  #touchui { display: none; }
+  body.touch #touchui { display: block; }
+  #joybase { position: fixed; z-index: 10; width: 130px; height: 130px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35);
+      background: rgba(255,255,255,.08); pointer-events: none; opacity: .45; transform: translate(-50%,-50%); }
+  #joybase.on { opacity: .9; }
+  #joyknob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+      background: rgba(255,255,255,.35); border: 2px solid rgba(255,255,255,.7); }
+  #btns { position: fixed; z-index: 20; right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom));
+      width: 250px; height: 170px; pointer-events: none; }
+  .btn { position: absolute; pointer-events: auto; touch-action: none; border-radius: 50%; border: 3px solid #fff;
+      background: rgba(60,60,60,.7); color: #ffff00; font-weight: bold; font-family: Impact, "Arial Narrow", Arial, sans-serif;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05; font-size: 15px; }
+  .btn small { font-size: 11px; color: #fff; font-family: Arial, sans-serif; }
+  .btn.ready { background: rgba(180,180,180,.55); color: #fff700; }
+  .btn.cd { color: #ff3232; }
+  .btn.lock { opacity: .25; border-color: #646464; }
+  .btn.down { transform: scale(.93); filter: brightness(1.3); }
+  #b0 { width: 92px; height: 92px; right: 0; bottom: 0; background: rgba(255,170,0,.6); font-size: 20px; }
+  #rot, #over { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; flex-direction: column;
+      background: rgba(11,11,15,.94); text-align: center; padding: 24px; gap: 14px; }
+  #rot .ic { font-size: 56px; display: inline-block; animation: tilt 2s ease-in-out infinite; }
+  @keyframes tilt { 0%,30% { transform: rotate(0); } 60%,100% { transform: rotate(-90deg); } }
+  #over { z-index: 40; background: rgba(11,11,15,.6); }
+  #over h1 { margin: 0; font-family: Impact, "Arial Narrow", Arial, sans-serif; font-size: 36px; font-weight: normal; color: #ff5050; }
+  #over button { min-width: 160px; min-height: 52px; font-size: 18px; font-weight: bold; border: 3px solid #fff; border-radius: 6px;
+      background: #666; color: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c" width="1024" height="768"></canvas></div>
+<div id="layer"></div>
+<a id="back" href="../../index.html">&larr; Back</a>
+<button id="fs" aria-label="Toggle fullscreen" title="Fullscreen">&#x26F6;</button>
+<div id="hint">Click to capture mouse (Esc releases) &middot; WASD move &middot; Mouse look &middot; Click / 1 / Space attack &middot; 2-6 abilities</div>
+<div id="touchui">
+  <div id="joybase"><div id="joyknob"></div></div>
+  <div id="btns"></div>
+</div>
+<div id="rot"><div class="ic">&#128241;</div><div style="font-size:20px;font-weight:bold">Rotate your phone</div><div style="opacity:.7">LadooWarrior plays best in landscape</div></div>
+<div id="over"><h1>Game Over! You were defeated.</h1><button id="restart">Play again</button></div>
+
+<script>
+"use strict";
+// ==========================================
+// CONFIGURATION & ASSET SLOTS (from original)
+// ==========================================
+const WIDTH = 1024, HEIGHT = 768;
+const FOV = 480;
+const FOG_DISTANCE = 18.0;
+const WEAPON_IMAGE_FILE = "weapon.png";
+const MONSTER_CONFIG = [
+  {name: "Bitter Gourd Creeper", hp: 120, atk: 8,  speed: 0.03, image: "monster1.png", ability: "1: Ladoo Throw"},
+  {name: "Salty Enderman",       hp: 200, atk: 12, speed: 0.04, image: "monster2.png", ability: "2: Sugar Shield (Heal)"},
+  {name: "Spicy Blaze Goblin",   hp: 300, atk: 18, speed: 0.05, image: "monster3.png", ability: "3: Cardamom Burst (Heavy)"},
+  {name: "Sour Ice Golem",       hp: 450, atk: 24, speed: 0.06, image: "monster4.png", ability: "4: Syrup Freeze (Stun)"},
+  {name: "Wither Phantom",       hp: 600, atk: 32, speed: 0.07, image: "monster5.png", ability: "5: Ghee Rage (2x Damage)"},
+  {name: "BOSS: KING GULAB JAMUN", hp: 1100, atk: 45, speed: 0.08, image: "boss.png", ability: "6: MAHA BLAST (Ultimate)"}
+];
+// Image files that actually ship with the game (others fall back to procedural art, as in the original).
+// Add a filename here when you drop it next to index.html.
+const ASSETS_PRESENT = new Set(["weapon.png", "monster1.png"]);
+
+const rnd = (a, b) => a + Math.random() * (b - a);
+const rgb = c => "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+const T = Math.trunc;
+
+// ==========================================
+// CANVAS / SCALING
+// ==========================================
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", {alpha: false});
+const COARSE = matchMedia("(pointer:coarse)").matches;
+const RES = COARSE ? 0.75 : 1;       // lower internal resolution on phones only
+canvas.width = Math.round(WIDTH * RES);
+canvas.height = Math.round(HEIGHT * RES);
+function resetCtx() {
+  ctx.setTransform(RES, 0, 0, RES, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.textBaseline = "top";
+}
+function fitCanvas() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const s = Math.min(vw / WIDTH, vh / HEIGHT);
+  const w = Math.floor(WIDTH * s), h = Math.floor(HEIGHT * s);
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
+  canvas.style.marginLeft = (-w / 2) + "px"; canvas.style.marginTop = (-h / 2) + "px";
+  checkOrientation();
+  needsRender = true;
+}
+
+// ==========================================
+// ASSETS
+// ==========================================
+const monsterSprites = {};
+let weaponTexture = null;
+function loadImg(file, cb) {
+  if (!ASSETS_PRESENT.has(file)) return;
+  const im = new Image();
+  im.onload = () => { cb(im); needsRender = true; };
+  im.onerror = () => {};
+  im.src = file;
+}
+loadImg(WEAPON_IMAGE_FILE, im => { weaponTexture = im; });
+MONSTER_CONFIG.forEach((m, i) => loadImg(m.image, im => { monsterSprites[i] = im; }));
+
+// ==========================================
+// GAME
+// ==========================================
+class VoxelParticle3D {
+  constructor(x, y, z, color, vx, vy, vz, size = 0.2) {
+    this.x = x; this.y = y; this.z = z; this.color = color;
+    this.vx = vx; this.vy = vy; this.vz = vz; this.size = size; this.life = 1.0;
+  }
+  update() {
+    this.x += this.vx; this.y += this.vy; this.z += this.vz;
+    this.vy -= 0.01; this.life -= 0.03;
+  }
+}
+
+let G;
+let needsRender = true;
+let logVisible = false;
+
+function buildBlocks() {
+  const blocks = [], a = 8;
+  for (let x = -a; x <= a; x++) for (let z = -a; z <= a; z++) blocks.push({pos: [x, -0.5, z], type: "sand"});
+  for (let x = -a; x <= a; x++) for (let z = -a; z <= a; z++) {
+    if (Math.abs(x) === a || Math.abs(z) === a) {
+      blocks.push({pos: [x, 0.5, z], type: "stone"});
+      blocks.push({pos: [x, 1.5, z], type: "stone"});
+    }
+  }
+  for (const cx of [-a, a]) for (const cz of [-a, a]) for (let h = 0; h < 3; h++) blocks.push({pos: [cx, h + 0.5, cz], type: "wood"});
+  return blocks;
+}
+const BLOCKS = buildBlocks();
+
+function newGame() {
+  const g = {
+    px: 0, py: 0.5, pz: -7.0, yaw: 0, pitch: 0,
+    playerMaxHp: 20, playerHp: 20, buff: 1.0,
+    swingAngle: 0, isSwinging: false,
+    roundNum: 0,
+    cd: {heal: 0, heavy: 0, stun: 0, buff: 0, ult: 0},
+    mx: 0, my: 0.5, mz: 5.0, monsterHp: 100, monsterMaxHp: 100,
+    stun: 0, atkCd: 0, recoil: 0,
+    clouds: Array.from({length: 12}, () => ({x: rnd(-30, 30), z: rnd(-10, 40), w: rnd(6, 12)})),
+    particles: [],
+    log: "WELCOME TO LADOO WARRIOR - DESERT SAND ARENA!", logTimer: 180,
+    over: false
+  };
+  G = g;
+  startRound(0);
+}
+
+function startRound(r) {
+  const cfg = MONSTER_CONFIG[r];
+  G.roundNum = r;
+  G.mx = 0; G.my = 0.5; G.mz = 6.0;
+  G.monsterHp = cfg.hp; G.monsterMaxHp = cfg.hp; G.stun = 0;
+  G.px = 0; G.py = 0.5; G.pz = -6.0; G.yaw = 0;
+  G.log = "ROUND " + (r + 1) + ": " + cfg.name + " SPAWNED! UNLOCKED: " + cfg.ability;
+  G.logTimer = 200;
+}
+
+// ---- projection ----
+function project(x, y, z) {
+  const dx = x - G.px, dy = y - G.py, dz = z - G.pz;
+  const cy = Math.cos(G.yaw), sy = Math.sin(G.yaw);
+  const rx = dx * cy - dz * sy;
+  const rz = dx * sy + dz * cy;
+  const cp = Math.cos(G.pitch), sp = Math.sin(G.pitch);
+  const ry = dy * cp - rz * sp;
+  const rzf = dy * sp + rz * cp;
+  if (rzf <= 0.1) return [null, null, rzf];
+  return [T(WIDTH / 2 + (rx / rzf) * FOV), T(HEIGHT / 2 - (ry / rzf) * FOV), rzf];
+}
+
+function fillRect(col, x, y, w, h) { ctx.fillStyle = rgb(col); ctx.fillRect(T(x), T(y), w, h); }
+function strokeRectIn(col, x, y, w, h, lw) {
+  ctx.strokeStyle = rgb(col); ctx.lineWidth = lw;
+  ctx.strokeRect(T(x) + lw / 2, T(y) + lw / 2, w - lw, h - lw);
+}
+
+function drawCube(bx, by, bz, type) {
+  const dist = Math.sqrt((bx - G.px) ** 2 + (by - G.py) ** 2 + (bz - G.pz) ** 2);
+  if (dist > FOG_DISTANCE) return;
+  const fog = Math.max(0.1, Math.min(1.0, 1.0 - dist / FOG_DISTANCE));
+  const h = 0.5;
+  const v = [
+    [bx - h, by + h, bz - h], [bx + h, by + h, bz - h], [bx + h, by + h, bz + h], [bx - h, by + h, bz + h],
+    [bx - h, by - h, bz - h], [bx + h, by - h, bz - h], [bx + h, by - h, bz + h], [bx - h, by - h, bz + h]
+  ];
+  const proj = v.map(p => project(p[0], p[1], p[2]));
+  let top, side;
+  if (type === "sand") { top = [T(225 * fog), T(215 * fog), T(145 * fog)]; side = [T(200 * fog), T(190 * fog), T(125 * fog)]; }
+  else if (type === "stone") { top = side = [T(125 * fog), T(125 * fog), T(125 * fog)]; }
+  else { top = side = [T(102 * fog), T(76 * fog), T(40 * fog)]; }
+  const sh = (c, f) => [T(c[0] * f), T(c[1] * f), T(c[2] * f)];
+  const faces = [
+    [[0, 1, 2, 3], top], [[4, 5, 1, 0], sh(side, 0.8)], [[5, 6, 2, 1], sh(side, 0.6)],
+    [[6, 7, 3, 2], sh(side, 0.8)], [[7, 4, 0, 3], sh(side, 0.6)]
+  ];
+  for (const [idx, col] of faces) {
+    const pts = idx.map(i => proj[i]);
+    if (pts.every(p => p[0] !== null)) {
+      const v1x = pts[1][0] - pts[0][0], v1y = pts[1][1] - pts[0][1];
+      const v2x = pts[2][0] - pts[0][0], v2y = pts[2][1] - pts[0][1];
+      if (v1x * v2y - v1y * v2x > 0) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0] + 0.5, pts[0][1] + 0.5);
+        for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
+        ctx.closePath();
+        ctx.fillStyle = rgb(col); ctx.fill();
+        ctx.strokeStyle = rgb(sh(col, 0.7)); ctx.lineWidth = 1; ctx.stroke();
+      }
+    }
+  }
+}
+
+// ---- input state ----
+const keys = Object.create(null);
+let actionQueue = [];
+let lookDX = 0, lookDY = 0;
+let joyF = 0, joyS = 0;
+
+// ---- combat ----
+function triggerAttack(damage, text, color) {
+  G.isSwinging = true; G.swingAngle = 45.0;
+  const final = T(damage * G.buff);
+  G.buff = 1.0;
+  const dist = Math.sqrt((G.px - G.mx) ** 2 + (G.pz - G.mz) ** 2);
+  if (dist < 9.0) {
+    G.monsterHp -= final; G.recoil = 0.4;
+    G.log = text + "! Dealt " + final + " damage!"; G.logTimer = 150;
+    for (let i = 0; i < 16; i++) {
+      G.particles.push(new VoxelParticle3D(G.mx, G.my, G.mz, color, rnd(-0.2, 0.2), rnd(0.1, 0.3), rnd(-0.2, 0.2)));
+    }
+    if (G.monsterHp <= 0) {
+      if (G.roundNum === 5) G.log = "VICTORY! KING GULAB JAMUN VANQUISHED!";
+      else startRound(G.roundNum + 1);
+    }
+  } else { G.log = "Target out of reach!"; G.logTimer = 100; }
+}
+const useAttack = () => triggerAttack(25, "Ladoo Sword Slash", [255, 170, 0]);
+function useHeal() { if (G.cd.heal <= 0) { G.playerHp = Math.min(G.playerMaxHp, G.playerHp + 6); G.cd.heal = 180; G.log = "Golden Apple Shield! Restored Hearts."; G.logTimer = 150; } }
+function useHeavy() { if (G.cd.heavy <= 0) { G.cd.heavy = 240; triggerAttack(65, "CARDAMOM CRIT HIT", [255, 50, 50]); } }
+function useStun() { if (G.cd.stun <= 0) { G.cd.stun = 300; G.stun = 180; triggerAttack(20, "ICE FREEZE STUN!", [100, 200, 255]); } }
+function useBuff() { if (G.cd.buff <= 0) { G.cd.buff = 360; G.buff = 2.0; G.log = "Ghee Strength II Potion! DOUBLE DAMAGE."; G.logTimer = 150; } }
+function useUlt() { if (G.cd.ult <= 0) { G.cd.ult = 450; triggerAttack(200, "MAHA LADOO BLAST ULTIMATE", [255, 215, 0]); } }
+function doAction(i) {
+  if (i === 0) useAttack();
+  else if (i === 1 && G.roundNum >= 1) useHeal();
+  else if (i === 2 && G.roundNum >= 2) useHeavy();
+  else if (i === 3 && G.roundNum >= 3) useStun();
+  else if (i === 4 && G.roundNum >= 4) useBuff();
+  else if (i === 5 && G.roundNum >= 5) useUlt();
+}
+
+// ---- one fixed 60 Hz tick: handle_input -> game over check -> update -> (log timer from render_hud) ----
+function step() {
+  // handle_input
+  const speed = 0.12;
+  const dx = Math.sin(G.yaw) * speed, dz = Math.cos(G.yaw) * speed;
+  const f = (keys.w ? 1 : 0) - (keys.s ? 1 : 0) + joyF;
+  const s = (keys.d ? 1 : 0) - (keys.a ? 1 : 0) + joyS;
+  G.px += dx * f; G.pz += dz * f;
+  G.px += dz * s; G.pz -= dx * s;
+  G.px = Math.max(-7, Math.min(7, G.px));
+  G.pz = Math.max(-7, Math.min(7, G.pz));
+  G.yaw += lookDX * 0.003;
+  G.pitch = Math.max(-0.5, Math.min(0.5, G.pitch - lookDY * 0.003));
+  lookDX = 0; lookDY = 0;
+  const q = actionQueue; actionQueue = [];
+  for (const a of q) doAction(a);
+
+  if (G.playerHp <= 0) { G.over = true; return; }
+
+  // update
+  for (const k in G.cd) if (G.cd[k] > 0) G.cd[k]--;
+  if (G.isSwinging) { G.swingAngle -= 4.0; if (G.swingAngle <= 0) { G.swingAngle = 0; G.isSwinging = false; } }
+  if (G.monsterRecoil > 0) G.recoil -= 0.05;
+  if (G.recoil > 0) G.recoil -= 0; // (recoil decay handled below, mirrors original)
+  for (let i = G.particles.length - 1; i >= 0; i--) {
+    const p = G.particles[i]; p.update();
+  }
+  G.particles = G.particles.filter(p => p.life > 0);
+  for (const c of G.clouds) { c.x += 0.01; if (c.x > 30) c.x = -30; }
+
+  if (G.monsterHp > 0) {
+    const cfg = MONSTER_CONFIG[G.roundNum];
+    if (G.stun > 0) G.stun--;
+    else {
+      const ddx = G.px - G.mx, ddz = G.pz - G.mz;
+      const dist = Math.sqrt(ddx * ddx + ddz * ddz);
+      if (dist > 1.8) { G.mx += (ddx / dist) * cfg.speed; G.mz += (ddz / dist) * cfg.speed; }
+      G.atkCd++;
+      if (G.atkCd >= 90) {
+        G.atkCd = 0;
+        if (dist < 2.5) {
+          G.playerHp -= Math.max(1, Math.floor(cfg.atk / 5));
+          G.log = cfg.name + " attacked you!"; G.logTimer = 120;
+        }
+      }
+    }
+  }
+  // render_hud's log timer handling
+  if (G.logTimer > 0) { G.logTimer--; logVisible = true; } else logVisible = false;
+}
+
+// ==========================================
+// RENDER
+// ==========================================
+function render() {
+  resetCtx();
+  const horizonY = HEIGHT >> 1;
+  const pitchOffset = T(G.pitch * FOV);
+  const hy = horizonY + pitchOffset;
+
+  fillRect([135, 206, 235], 0, 0, WIDTH, HEIGHT);
+  if (hy < HEIGHT) fillRect([180, 165, 110], 0, Math.max(0, hy), WIDTH, HEIGHT - Math.max(0, hy));
+
+  let [sx, sy] = project(10, 18, 25);
+  if (sx) fillRect([255, 255, 200], sx - 35, sy - 35, 70, 70);
+
+  for (const c of G.clouds) {
+    const [cx, cy] = project(c.x, 8, c.z);
+    if (cx) fillRect([255, 255, 255], cx - 40, cy - 10, T(c.w * 12), 20);
+  }
+
+  const q = [];
+  const px = G.px, py = G.py, pz = G.pz;
+  for (const b of BLOCKS) {
+    const p = b.pos;
+    q.push([0, (p[0] - px) ** 2 + (p[1] - py) ** 2 + (p[2] - pz) ** 2, b]);
+  }
+  q.push([1, (G.mx - px) ** 2 + (G.my - py) ** 2 + (G.mz - pz) ** 2, null]);
+  for (const p of G.particles) q.push([2, (p.x - px) ** 2 + (p.y - py) ** 2 + (p.z - pz) ** 2, p]);
+  q.sort((a, b) => b[1] - a[1]);
+
+  for (const [kind, , d] of q) {
+    if (kind === 0) drawCube(d.pos[0], d.pos[1], d.pos[2], d.type);
+    else if (kind === 2) {
+      const [x, y, rz] = project(d.x, d.y, d.z);
+      if (x && rz > 0.5) {
+        const sz = Math.max(2, T(FOV / rz * d.size));
+        fillRect(d.color, x - (sz >> 1), y - (sz >> 1), sz, sz);
+      }
+    } else renderMonster();
+  }
+  renderWeapon();
+  renderHud();
+  needsRender = false;
+}
+
+function renderMonster() {
+  const [sx, sy, rz] = project(G.mx, G.my, G.mz);
+  if (sx && rz > 0.5) {
+    const wh = G.roundNum === 5 ? 2.3 : 1.8;
+    const h = Math.max(10, T((wh / rz) * FOV));
+    const img = monsterSprites[G.roundNum];
+    if (img) {
+      const w = Math.max(10, T(h * (img.naturalWidth / img.naturalHeight)));
+      ctx.drawImage(img, sx - (w >> 1), sy - (h >> 1), w, h);
+    } else {
+      const w = Math.max(10, T(h * 0.5));
+      const colors = [[200, 100, 40], [40, 40, 60], [220, 60, 60], [100, 200, 255], [160, 50, 160], [255, 30, 30]];
+      const mc = G.stun ? [100, 200, 255] : colors[G.roundNum];
+      const x0 = sx - Math.floor(w / 2), y0 = sy - Math.floor(h / 2);
+      fillRect(mc, x0, y0, w, h);
+      strokeRectIn([0, 0, 0], x0, y0, w, h, 2);
+      const e = Math.max(2, Math.floor(w / 5));
+      fillRect([255, 255, 0], sx - e * 1.5, sy - Math.floor(h / 4), e, e);
+      fillRect([255, 255, 0], sx + e * 0.5, sy - Math.floor(h / 4), e, e);
+    }
+  }
+}
+
+let swordCanvas = null;
+function renderWeapon() {
+  const wx = WIDTH - 280, wy = HEIGHT - 240;
+  if (weaponTexture) { ctx.drawImage(weaponTexture, wx, wy, 240, 240); return; }
+  if (!swordCanvas) {
+    swordCanvas = document.createElement("canvas"); swordCanvas.width = 180; swordCanvas.height = 180;
+    const s = swordCanvas.getContext("2d");
+    const poly = (c, pts) => { s.fillStyle = rgb(c); s.beginPath(); s.moveTo(pts[0][0], pts[0][1]); for (const p of pts.slice(1)) s.lineTo(p[0], p[1]); s.closePath(); s.fill(); };
+    poly([80, 220, 220], [[90, 20], [160, 90], [140, 110], [70, 40]]);
+    poly([40, 160, 160], [[90, 20], [160, 90], [150, 100], [80, 30]]);
+    s.fillStyle = rgb([255, 215, 0]); s.fillRect(60, 100, 30, 30);
+    s.fillStyle = rgb([102, 76, 40]); s.fillRect(40, 120, 25, 25);
+    s.fillStyle = rgb([255, 170, 0]); s.beginPath(); s.arc(75, 115, 12, 0, Math.PI * 2); s.fill();
+  }
+  const a = G.swingAngle * Math.PI / 180;
+  const nw = 180 * (Math.abs(Math.cos(a)) + Math.abs(Math.sin(a)));
+  const tx = wx - T(G.swingAngle * 1.5), ty = wy + T(G.swingAngle);
+  ctx.save();
+  ctx.translate(tx + nw / 2, ty + nw / 2);
+  ctx.rotate(-a);
+  ctx.drawImage(swordCanvas, -90, -90);
+  ctx.restore();
+}
+
+function text(str, font, col, x, y) {
+  ctx.font = font; ctx.fillStyle = col; ctx.fillText(str, x, y);
+}
+const HUD_FONT = "bold 14px Arial, Helvetica, sans-serif";
+const LOG_FONT = "20px Impact, 'Arial Narrow', 'Arial Black', sans-serif";
+function textW(str, font) { ctx.font = font; return ctx.measureText(str).width; }
+
+function renderHud() {
+  fillRect([0, 0, 0], 0, 0, 0, 0);
+  strokeRectIn([255, 255, 255], WIDTH / 2 - 6, HEIGHT / 2 - 6, 12, 12, 2);
+
+  const cfg = MONSTER_CONFIG[G.roundNum];
+  const nm = cfg.name + " (Round " + (G.roundNum + 1) + "/6)";
+  text(nm, HUD_FONT, "#fff", WIDTH / 2 - textW(nm, HUD_FONT) / 2, 12);
+  const barW = 400, barX = WIDTH / 2 - barW / 2;
+  fillRect([40, 40, 40], barX, 32, barW, 16);
+  const ratio = Math.max(0, G.monsterHp / G.monsterMaxHp);
+  fillRect(G.roundNum === 5 ? [200, 40, 200] : [220, 40, 40], barX, 32, T(barW * ratio), 16);
+  strokeRectIn([255, 255, 255], barX, 32, barW, 16, 2);
+
+  const startX = WIDTH / 2 - 180, heartY = HEIGHT - 80;
+  for (let i = 0; i < 10; i++) {
+    const x = startX + i * 20;
+    fillRect([0, 0, 0], x, heartY, 16, 16);
+    if (G.playerHp >= (i + 1) * 2) fillRect([220, 20, 20], x + 2, heartY + 2, 12, 12);
+    else if (G.playerHp >= i * 2 + 1) fillRect([220, 20, 20], x + 2, heartY + 2, 6, 12);
+    else fillRect([60, 60, 60], x + 2, heartY + 2, 12, 12);
+  }
+
+  const hbW = 6 * 50 + 10, hbX = WIDTH / 2 - hbW / 2, hbY = HEIGHT - 50;
+  fillRect([100, 100, 100], hbX, hbY, hbW, 44);
+  strokeRectIn([0, 0, 0], hbX, hbY, hbW, 44, 3);
+  const abil = ["Ladoo", "Shield", "Burst", "Freeze", "Rage", "MAHA"];
+  const cdKeys = ["", "heal", "heavy", "stun", "buff", "ult"];
+  for (let i = 0; i < 6; i++) {
+    const bx = hbX + 5 + i * 50;
+    const unlocked = G.roundNum >= i;
+    const cd = G.cd[cdKeys[i]] || 0;
+    fillRect(unlocked && cd === 0 ? [180, 180, 180] : [60, 60, 60], bx, hbY + 4, 44, 36);
+    strokeRectIn(unlocked ? [255, 255, 255] : [100, 100, 100], bx, hbY + 4, 44, 36, 2);
+    text(String(i + 1), HUD_FONT, unlocked ? "rgb(255,255,0)" : "rgb(150,150,150)", bx + 3, hbY + 6);
+    if (unlocked) {
+      if (cd > 0) text(Math.floor(cd / 60) + "s", HUD_FONT, "rgb(255,50,50)", bx + 12, hbY + 16);
+      else text(abil[i].slice(0, 4), HUD_FONT, "#000", bx + 6, hbY + 18);
+    }
+  }
+  if (logVisible) text(G.log, LOG_FONT, "#fff", WIDTH / 2 - textW(G.log, LOG_FONT) / 2, 70);
+}
+
+// ==========================================
+// MAIN LOOP (fixed 60 Hz timestep)
+// ==========================================
+const DT = 1000 / 60;
+let last = performance.now(), acc = 0, paused = false;
+function frame(t) {
+  requestAnimationFrame(frame);
+  if (paused) { last = t; return; }
+  acc += Math.min(t - last, 100); last = t;
+  let n = 0;
+  while (acc >= DT && n < 4 && !G.over) { step(); acc -= DT; n++; }
+  if (n === 4 || G.over) acc = 0;
+  if (n > 0 || needsRender) { render(); updateButtons(); }
+  if (G.over && !overShown) showOver();
+}
+let overShown = false;
+const overEl = document.getElementById("over");
+function showOver() { overShown = true; overEl.style.display = "flex"; for (const k in keys) keys[k] = false; joyF = joyS = 0; }
+function restart() { overEl.style.display = "none"; overShown = false; newGame(); needsRender = true; }
+document.getElementById("restart").addEventListener("click", restart);
+
+// ==========================================
+// INPUT: keyboard / mouse (desktop)
+// ==========================================
+const MOVEKEYS = {w: "w", a: "a", s: "s", d: "d"};
+addEventListener("keydown", e => {
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (e.key === " " || /^[1-6]$/.test(e.key)) e.preventDefault();
+  if (G.over) { if (k === "Enter" || k === " " || k === "r") restart(); return; }
+  if (MOVEKEYS[k]) { keys[MOVEKEYS[k]] = true; return; }
+  if (e.repeat) return;
+  if (k === "1" || k === " ") actionQueue.push(0);
+  else if (/^[2-6]$/.test(k)) actionQueue.push(+k - 1);
+});
+addEventListener("keyup", e => { const k = e.key.length === 1 ? e.key.toLowerCase() : e.key; if (MOVEKEYS[k]) keys[MOVEKEYS[k]] = false; });
+addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+addEventListener("contextmenu", e => e.preventDefault());
+addEventListener("selectstart", e => e.preventDefault());
+addEventListener("dragstart", e => e.preventDefault());
+
+const layer = document.getElementById("layer");
+const locked = () => document.pointerLockElement === layer;
+document.addEventListener("pointerlockchange", () => document.body.classList.toggle("locked", locked()));
+document.addEventListener("pointerlockerror", () => {});
+addEventListener("mousemove", e => { if (locked()) { lookDX += e.movementX || 0; lookDY += e.movementY || 0; } });
+
+// ==========================================
+// INPUT: touch (joystick + look drag + buttons)
+// ==========================================
+const joybase = document.getElementById("joybase"), joyknob = document.getElementById("joyknob");
+const JOY_R = 50;
+let joyPtr = null, joyOx = 0, joyOy = 0, lookPtr = null, lookX = 0, lookY = 0;
+function placeJoy(x, y) { joybase.style.left = x + "px"; joybase.style.top = y + "px"; }
+function restJoy() {
+  placeJoy(Math.max(90, innerWidth * 0.12) + 0, innerHeight - Math.max(90, innerHeight * 0.28));
+  joyknob.style.transform = ""; joybase.classList.remove("on");
+}
+let audioCtx = null;
+function unlockAudio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!audioCtx) audioCtx = new AC();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  } catch (e) {}
+}
+function enableTouchUI() { document.body.classList.add("touch"); restJoy(); }
+
+layer.addEventListener("pointerdown", e => {
+  unlockAudio();
+  if (e.pointerType === "mouse") {
+    if (e.button !== 0) return;
+    if (!locked()) { try { const p = layer.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
+    if (!G.over) actionQueue.push(0);
+    return;
+  }
+  enableTouchUI();
+  try { layer.setPointerCapture(e.pointerId); } catch (err) {}
+  if (e.clientX < innerWidth * 0.45) {
+    if (joyPtr !== null) return;
+    joyPtr = e.pointerId; joyOx = e.clientX; joyOy = e.clientY;
+    placeJoy(joyOx, joyOy); joybase.classList.add("on");
+  } else if (lookPtr === null) {
+    lookPtr = e.pointerId; lookX = e.clientX; lookY = e.clientY;
+  }
+});
+layer.addEventListener("pointermove", e => {
+  if (e.pointerId === joyPtr) {
+    let dx = e.clientX - joyOx, dy = e.clientY - joyOy;
+    const d = Math.hypot(dx, dy);
+    if (d > JOY_R) { dx = dx / d * JOY_R; dy = dy / d * JOY_R; }
+    joyknob.style.transform = "translate(" + dx + "px," + dy + "px)";
+    let nx = dx / JOY_R, ny = dy / JOY_R;
+    if (Math.hypot(nx, ny) < 0.12) { nx = 0; ny = 0; }
+    joyS = nx; joyF = -ny;
+  } else if (e.pointerId === lookPtr) {
+    lookDX += (e.clientX - lookX) * 2; lookDY += (e.clientY - lookY) * 2;
+    lookX = e.clientX; lookY = e.clientY;
+  }
+});
+function endPtr(e) {
+  if (e.pointerId === joyPtr) { joyPtr = null; joyF = 0; joyS = 0; restJoy(); }
+  if (e.pointerId === lookPtr) lookPtr = null;
+}
+layer.addEventListener("pointerup", endPtr);
+layer.addEventListener("pointercancel", endPtr);
+layer.addEventListener("lostpointercapture", endPtr);
+
+// action buttons
+const btnsEl = document.getElementById("btns");
+const BTN_DEF = [
+  {i: 0, id: "b0", label: "ATTACK", sub: "", pos: ""},
+  {i: 1, label: "2", sub: "Shield", pos: "right:104px;bottom:6px"},
+  {i: 2, label: "3", sub: "Burst", pos: "right:172px;bottom:6px"},
+  {i: 3, label: "4", sub: "Freeze", pos: "right:178px;bottom:76px"},
+  {i: 4, label: "5", sub: "Rage", pos: "right:110px;bottom:80px"},
+  {i: 5, label: "6", sub: "MAHA", pos: "right:42px;bottom:104px"}
+];
+const btnEls = [], btnState = [];
+for (const d of BTN_DEF) {
+  const b = document.createElement("div");
+  b.className = "btn"; if (d.id) b.id = d.id;
+  if (d.i > 0) { b.style.cssText = d.pos + ";width:60px;height:60px"; }
+  b.innerHTML = d.i === 0 ? "ATTACK" : d.label + "<small>" + d.sub + "</small>";
+  b.addEventListener("pointerdown", e => {
+    e.preventDefault(); e.stopPropagation(); unlockAudio(); enableTouchUI();
+    b.classList.add("down");
+    if (!G.over) actionQueue.push(d.i);
+  });
+  const up = () => b.classList.remove("down");
+  b.addEventListener("pointerup", up); b.addEventListener("pointercancel", up); b.addEventListener("pointerleave", up);
+  btnsEl.appendChild(b); btnEls.push(b); btnState.push("");
+}
+const CDK = ["", "heal", "heavy", "stun", "buff", "ult"];
+function updateButtons() {
+  if (!document.body.classList.contains("touch")) return;
+  for (let i = 1; i < 6; i++) {
+    const unlocked = G.roundNum >= i, cd = G.cd[CDK[i]] || 0;
+    const st = !unlocked ? "L" : cd > 0 ? "C" + Math.floor(cd / 60) : "R";
+    if (st === btnState[i]) continue;
+    btnState[i] = st;
+    const b = btnEls[i], d = BTN_DEF[i];
+    b.className = "btn " + (!unlocked ? "lock" : cd > 0 ? "cd" : "ready");
+    b.innerHTML = (cd > 0 && unlocked ? Math.floor(cd / 60) + "s" : d.label) + "<small>" + d.sub + "</small>";
+  }
+}
+
+// fullscreen
+const fsBtn = document.getElementById("fs");
+fsBtn.addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else {
+      await document.documentElement.requestFullscreen();
+      try { await screen.orientation.lock("landscape"); } catch (e) {}
+    }
+  } catch (e) {}
+});
+if (!document.documentElement.requestFullscreen) fsBtn.style.display = "none";
+
+// orientation hint (touch devices, portrait)
+const rotEl = document.getElementById("rot");
+function checkOrientation() {
+  const portrait = COARSE && innerHeight > innerWidth;
+  rotEl.style.display = portrait ? "flex" : "none";
+  paused = portrait;
+  if (document.body.classList.contains("touch")) restJoy();
+}
+addEventListener("resize", fitCanvas);
+addEventListener("orientationchange", () => setTimeout(fitCanvas, 100));
+if (window.visualViewport) visualViewport.addEventListener("resize", fitCanvas);
+
+// ==========================================
+// BOOT
+// ==========================================
+newGame();
+if (COARSE) enableTouchUI();
+fitCanvas();
+window.__lw = {get G() { return G; }, step, render};
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

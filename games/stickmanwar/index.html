@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Stickman 1v1 Fighting Arena</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #05070d; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #game { display: block; background: #0f172a; touch-action: none; user-select: none; -webkit-user-select: none; outline: none; }
+  #back { position: fixed; top: 4px; left: 8px; font: 11px Arial, sans-serif; color: #64748b; text-decoration: none; opacity: .75; z-index: 2; }
+  #back:hover { color: #cbd5e1; opacity: 1; }
+</style>
+</head>
+<body>
+<a id="back" href="../../index.html">&larr; Back to Parody Games</a>
+<canvas id="game" width="900" height="500" tabindex="0"></canvas>
+<script>
+"use strict";
+(function () {
+const WIDTH = 900, HEIGHT = 500, FLOOR_Y = 400, TICK_MS = 20;
+
+const ROSTER = ["Koustav","Pikai","Laddo","Rudra","Amit","Anik","Rehan","Deeu","Aniket","Shubronill","Pavel","Bipro"];
+const COLORS = ["#ef4444","#3b82f6","#10b981","#f59e0b","#8b5cf6","#ec4899","#06b6d4","#84cc16","#f97316","#6366f1","#14b8a6","#d946ef"];
+const SPECIAL_NAMES = {
+  Koustav:"LASER BEAM", Pikai:"FIREBALL", Laddo:"THUNDER STRIKE", Rudra:"DRAGON DASH",
+  Amit:"SHADOW SLICE", Anik:"TOXIC BLAST", Rehan:"ICE SPIKE", Deeu:"SONIC BOOM",
+  Aniket:"POWER SLAM", Shubronill:"AURA BURST", Pavel:"METEOR KICK", Bipro:"HYPER BEAM"
+};
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+/* ---------- assets (relative paths, silent fallback) ---------- */
+const FACE_IMAGES = {};
+let BG_IMAGE = null;
+function loadImg(src, cb) {
+  const im = new Image();
+  im.onload = () => { if (im.naturalWidth > 0) cb(im); };
+  im.onerror = () => {};
+  im.src = src;
+}
+ROSTER.forEach(n => { FACE_IMAGES[n] = null; loadImg(n.toLowerCase() + ".png", im => { FACE_IMAGES[n] = im; }); });
+loadImg("arena_bg.png", im => { BG_IMAGE = im; });
+
+/* ---------- sound (WebAudio beeps, mirrors winsound.Beep) ---------- */
+let actx = null;
+function beep(freq, ms) {
+  try {
+    if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; actx = new AC(); }
+    if (actx.state === "suspended") actx.resume();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = "square"; o.frequency.value = freq; g.gain.value = 0.04;
+    o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime + ms / 1000);
+  } catch (e) {}
+}
+function playSfx(t) {
+  if (t === "punch") beep(450, 40);
+  else if (t === "kick") beep(300, 60);
+  else if (t === "special") beep(850, 120);
+  else if (t === "hit") beep(180, 50);
+}
+
+/* ---------- objects ---------- */
+class Projectile {
+  constructor(x, y, direction, color) { this.x = x; this.y = y; this.vx = direction * 12; this.color = color; this.active = true; }
+  update() { this.x += this.vx; if (this.x < 0 || this.x > WIDTH) this.active = false; }
+}
+class Stickman {
+  constructor(name, color, startX, isP2) {
+    this.name = name; this.color = color; this.x = startX; this.y = FLOOR_Y; this.vx = 0; this.vy = 0;
+    this.is_p2 = isP2; this.facing = isP2 ? -1 : 1; this.hp = 100; this.energy = 0;
+    this.is_jumping = false; this.is_attacking = false; this.attack_type = null; this.attack_cooldown = 0;
+    this.special_title = SPECIAL_NAMES[name] || "SPECIAL ATTACK";
+  }
+  get photo() { return FACE_IMAGES[this.name]; }
+  update() {
+    this.x += this.vx; this.y += this.vy;
+    if (this.y < FLOOR_Y) this.vy += 1.2;
+    else { this.y = FLOOR_Y; this.vy = 0; this.is_jumping = false; }
+    this.vx *= 0.8;
+    this.x = Math.max(30, Math.min(WIDTH - 30, this.x));
+    if (this.attack_cooldown > 0) {
+      this.attack_cooldown -= 1;
+      if (this.attack_cooldown === 0) this.is_attacking = false;
+    }
+  }
+}
+
+/* ---------- game state ---------- */
+let mode = "AI", p1_idx = 0, p2_idx = 1, state = "SELECT";
+const keys = {};
+let projectiles = [];
+let p1 = null, p2 = null;
+
+function startMatch() {
+  p1 = new Stickman(ROSTER[p1_idx], COLORS[p1_idx], 200, false);
+  p2 = new Stickman(ROSTER[p2_idx], COLORS[p2_idx], 700, true);
+  projectiles = [];
+  state = "FIGHT";
+  tick();
+  acc = 0;
+}
+
+function processInputs() {
+  if (state !== "FIGHT") return;
+  if (keys.a) { p1.vx = -5; p1.facing = -1; }
+  if (keys.d) { p1.vx = 5; p1.facing = 1; }
+  if (keys.w && !p1.is_jumping) { p1.vy = -18; p1.is_jumping = true; }
+  if (keys.f && p1.attack_cooldown === 0) attack(p1, p2, "punch", 8, 45);
+  if (keys.g && p1.attack_cooldown === 0) attack(p1, p2, "kick", 14, 55);
+  if (keys.h && p1.energy >= 100 && p1.attack_cooldown === 0) useSpecial(p1, p2);
+
+  if (mode === "PVP") {
+    if (keys.left) { p2.vx = -5; p2.facing = -1; }
+    if (keys.right) { p2.vx = 5; p2.facing = 1; }
+    if (keys.up && !p2.is_jumping) { p2.vy = -18; p2.is_jumping = true; }
+    if (keys.j && p2.attack_cooldown === 0) attack(p2, p1, "punch", 8, 45);
+    if (keys.k && p2.attack_cooldown === 0) attack(p2, p1, "kick", 14, 55);
+    if (keys.l && p2.energy >= 100 && p2.attack_cooldown === 0) useSpecial(p2, p1);
+  } else runAi();
+}
+
+function runAi() {
+  if (!p1 || !p2) return;
+  const dist = p1.x - p2.x, abs = Math.abs(dist);
+  p2.facing = dist > 0 ? 1 : -1;
+  if (abs > 50) p2.vx = dist > 0 ? 4.5 : -4.5;
+  if ((p1.is_jumping || Math.random() < 0.03) && !p2.is_jumping) { p2.vy = -18; p2.is_jumping = true; }
+  if (abs <= 75 && p2.attack_cooldown === 0) {
+    if (p2.energy >= 100) useSpecial(p2, p1);
+    else {
+      const atk = Math.random() < 0.5 ? "punch" : "kick";
+      attack(p2, p1, atk, atk === "punch" ? 8 : 14, 55);
+    }
+  }
+}
+
+function attack(att, def, type, dmg, reach) {
+  att.is_attacking = true; att.attack_type = type; att.attack_cooldown = 12;
+  playSfx(type);
+  const hitX = att.x + att.facing * reach;
+  if (Math.abs(hitX - def.x) < 45 && Math.abs(att.y - def.y) < 60) {
+    def.hp = Math.max(0, def.hp - dmg);
+    def.vx += att.facing * 8;
+    att.energy = Math.min(100, att.energy + 15);
+    def.energy = Math.min(100, def.energy + 8);
+    playSfx("hit");
+  }
+}
+
+function useSpecial(att, def) {
+  att.energy = 0; att.is_attacking = true; att.attack_type = "special"; att.attack_cooldown = 20;
+  playSfx("special");
+  projectiles.push([new Projectile(att.x + att.facing * 30, att.y - 60, att.facing, att.color), att, def]);
+}
+
+function tick() {
+  if (state !== "FIGHT") return;
+  processInputs();
+  p1.update(); p2.update();
+  for (const pd of projectiles.slice()) {
+    const [proj, att, def] = pd;
+    proj.update();
+    if (Math.abs(proj.x - def.x) < 30 && Math.abs(proj.y - (def.y - 50)) < 50) {
+      def.hp = Math.max(0, def.hp - 30);
+      def.vx += att.facing * 15;
+      proj.active = false;
+      playSfx("hit");
+    }
+    if (!proj.active) projectiles.splice(projectiles.indexOf(pd), 1);
+  }
+  if (p1.hp <= 0 || p2.hp <= 0) state = "GAME_OVER";
+}
+
+/* ---------- input: keyboard ---------- */
+const KEYMAP = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+function keyName(e) { return KEYMAP[e.key] || (e.key || "").toLowerCase(); }
+window.addEventListener("keydown", e => {
+  const k = keyName(e);
+  keys[k] = true;
+  if (["left","right","up","down"].includes(k) || k === " ") e.preventDefault();
+  if (state === "GAME_OVER" && k === "r") toSelect();
+});
+window.addEventListener("keyup", e => { keys[keyName(e)] = false; });
+window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+
+function toSelect() { state = "SELECT"; }
+
+/* ---------- input: mouse / touch (pointer events, multi-touch capable) ---------- */
+const ptrKeys = new Map();
+function toLogical(e) {
+  const r = canvas.getBoundingClientRect();
+  return [(e.clientX - r.left) * WIDTH / r.width, (e.clientY - r.top) * HEIGHT / r.height];
+}
+canvas.addEventListener("pointerdown", e => {
+  const [x, y] = toLogical(e);
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (state === "SELECT") {
+    if (x >= 350 && x <= 550 && y >= 60 && y <= 90) { mode = mode === "PVP" ? "AI" : "PVP"; return; }
+    for (let i = 0; i < 12; i++) {
+      const r = Math.floor(i / 4), c = i % 4, bx = 140 + c * 160, by = 105 + r * 100;
+      if (x >= bx && x <= bx + 140 && y >= by && y <= by + 85) {
+        if (x <= bx + 70) p1_idx = i; else { p2_idx = i; mode = "AI"; }
+        return;
+      }
+    }
+    if (x >= 360 && x <= 540 && y >= 445 && y <= 485) startMatch();
+  } else if (state === "FIGHT") {
+    const hit = [];
+    if (x >= 20 && x <= 70 && y >= 420 && y <= 480) hit.push("a");
+    if (x >= 80 && x <= 130 && y >= 420 && y <= 480) hit.push("d");
+    if (x >= 50 && x <= 100 && y >= 350 && y <= 410) hit.push("w");
+    if (x >= 660 && x <= 720 && y >= 420 && y <= 480) hit.push("f");
+    if (x >= 730 && x <= 790 && y >= 420 && y <= 480) hit.push("g");
+    if (x >= 800 && x <= 880 && y >= 420 && y <= 480) hit.push("h");
+    hit.forEach(k => keys[k] = true);
+    ptrKeys.set(e.pointerId, hit);
+  } else if (state === "GAME_OVER") {
+    toSelect();
+  }
+});
+function release(e) {
+  const hit = ptrKeys.get(e.pointerId);
+  if (hit) { hit.forEach(k => keys[k] = false); ptrKeys.delete(e.pointerId); }
+}
+canvas.addEventListener("pointerup", release);
+canvas.addEventListener("pointercancel", release);
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+/* ---------- drawing helpers (tk canvas emulation) ---------- */
+const px = pt => Math.round(pt * 4 / 3);
+function rect(x1, y1, x2, y2, fill, outline, width) {
+  if (outline === undefined) outline = "#000";
+  if (fill) { ctx.fillStyle = fill; ctx.fillRect(x1, y1, x2 - x1, y2 - y1); }
+  if (outline) { ctx.strokeStyle = outline; ctx.lineWidth = width || 1; ctx.strokeRect(x1, y1, x2 - x1, y2 - y1); }
+}
+function line(x1, y1, x2, y2, color, width) {
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = "butt";
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+}
+function oval(x1, y1, x2, y2, fill, outline, width) {
+  if (outline === undefined) outline = "#000";
+  ctx.beginPath();
+  ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, (x2 - x1) / 2, (y2 - y1) / 2, 0, 0, Math.PI * 2);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (outline) { ctx.strokeStyle = outline; ctx.lineWidth = width || 1; ctx.stroke(); }
+}
+function text(x, y, str, font, fill, anchor) {
+  ctx.font = font; ctx.fillStyle = fill; ctx.textBaseline = "middle";
+  ctx.textAlign = anchor === "w" ? "left" : anchor === "e" ? "right" : "center";
+  ctx.fillText(str, x, y);
+}
+const IMPACT = 'Impact, "Arial Narrow Bold", "Arial Black", sans-serif';
+const ARIAL = 'Arial, Helvetica, sans-serif';
+
+/* ---------- screens ---------- */
+function drawSelect() {
+  text(450, 30, "STICKMAN 1v1 FIGHTER", px(26) + "px " + IMPACT, "#f43f5e");
+  const mColor = mode === "AI" ? "#3b82f6" : "#22c55e";
+  rect(350, 60, 550, 90, mColor, "#fff");
+  text(450, 75, `MODE: ${mode} (Tap to Switch)`, "bold " + px(10) + "px " + ARIAL, "#fff");
+
+  ROSTER.forEach((name, i) => {
+    const r = Math.floor(i / 4), c = i % 4, x = 140 + c * 160, y = 105 + r * 100;
+    const s1 = i === p1_idx, s2 = i === p2_idx;
+    const border = s1 ? "#ef4444" : (s2 ? "#3b82f6" : "#334155");
+    rect(x, y, x + 140, y + 85, "#1e293b", border, (s1 || s2) ? 3 : 1);
+    const img = FACE_IMAGES[name];
+    if (img) {
+      ctx.drawImage(img, x + 22 - 16, y + 25 - 16, 32, 32);
+      text(x + 80, y + 22, name, "bold " + px(10) + "px " + ARIAL, COLORS[i]);
+    } else text(x + 70, y + 22, name, "bold " + px(10) + "px " + ARIAL, COLORS[i]);
+
+    rect(x + 6, y + 50, x + 66, y + 78, s1 ? "#ef4444" : "#334155", s1 ? "#fff" : "");
+    text(x + 36, y + 64, "SET P1", "bold " + px(8) + "px " + ARIAL, "#fff");
+    rect(x + 74, y + 50, x + 134, y + 78, s2 ? "#3b82f6" : "#334155", s2 ? "#fff" : "");
+    text(x + 104, y + 64, mode === "AI" ? "SET AI" : "SET P2", "bold " + px(8) + "px " + ARIAL, "#fff");
+  });
+
+  rect(360, 445, 540, 485, "#22c55e", "#fff", 2);
+  text(450, 465, "START MATCH", px(16) + "px " + IMPACT, "#fff");
+}
+
+function drawArena() {
+  if (BG_IMAGE) ctx.drawImage(BG_IMAGE, 0, 0, WIDTH, HEIGHT);
+  else rect(0, 0, WIDTH, HEIGHT, "#0f172a");
+  rect(0, FLOOR_Y, WIDTH, HEIGHT, "#1e293b", "");
+  line(0, FLOOR_Y, WIDTH, FLOOR_Y, "#475569", 4);
+}
+
+function drawProjectiles() {
+  for (const [p] of projectiles) oval(p.x - 12, p.y - 12, p.x + 12, p.y + 12, p.color, "#fff", 2);
+}
+
+function drawStickman(p) {
+  const x = p.x, y = p.y;
+  line(x, y - 40, x, y - 80, p.color, 4);
+  line(x, y - 40, x - 15, y, p.color, 4);
+  line(x, y - 40, x + 15, y, p.color, 4);
+  if (p.is_attacking) {
+    const rx = x + p.facing * 40;
+    if (p.attack_type === "punch") {
+      line(x, y - 65, rx, y - 65, "#fde047", 5);
+      line(x, y - 65, x - p.facing * 15, y - 50, p.color, 4);
+    } else if (p.attack_type === "kick") {
+      line(x, y - 40, rx, y - 25, "#fde047", 5);
+      line(x, y - 65, x + p.facing * 15, y - 50, p.color, 4);
+    } else if (p.attack_type === "special") {
+      line(x, y - 65, rx + p.facing * 20, y - 65, "#ec4899", 7);
+    }
+  } else {
+    line(x, y - 65, x - 15, y - 45, p.color, 4);
+    line(x, y - 65, x + 15, y - 45, p.color, 4);
+  }
+  if (p.photo) ctx.drawImage(p.photo, x - 16, y - 95 - 16, 32, 32);
+  else {
+    oval(x - 18, y - 110, x + 18, y - 74, "#0f172a", p.color, 3);
+    text(x, y - 92, p.name[0], "bold " + px(10) + "px " + ARIAL, "#fff");
+  }
+}
+
+function drawTouchControls() {
+  const f16 = "bold " + px(16) + "px " + ARIAL, f8 = "bold " + px(8) + "px " + ARIAL;
+  rect(20, 420, 70, 480, "#334155", "#fff"); text(45, 450, "◄", f16, "#fff");
+  rect(80, 420, 130, 480, "#334155", "#fff"); text(105, 450, "►", f16, "#fff");
+  rect(50, 350, 100, 410, "#334155", "#fff"); text(75, 380, "▲", f16, "#fff");
+  rect(660, 420, 720, 480, "#ef4444", "#fff"); text(690, 450, "PUNCH", f8, "#fff");
+  rect(730, 420, 790, 480, "#3b82f6", "#fff"); text(760, 450, "KICK", f8, "#fff");
+  const ready = p1.energy >= 100;
+  rect(800, 420, 880, 480, ready ? "#eab308" : "#64748b", "#fff");
+  text(840, 450, "SPECIAL", f8, ready ? "#000" : "#fff");
+}
+
+function drawHud() {
+  const f10 = "bold " + px(10) + "px " + ARIAL;
+  rect(30, 15, 330, 35, "#090d16", "#fff");
+  rect(30, 15, 30 + p1.hp * 3, 35, "#ef4444");
+  text(40, 25, `P1: ${p1.name}`, f10, "#fff", "w");
+  rect(30, 40, 200, 50, "#090d16", "#fff");
+  rect(30, 40, 30 + p1.energy * 1.7, 50, "#eab308");
+
+  rect(570, 15, 870, 35, "#090d16", "#fff");
+  rect(870 - p2.hp * 3, 15, 870, 35, "#3b82f6");
+  text(860, 25, `${mode === "AI" ? "AI" : "P2"}: ${p2.name}`, f10, "#fff", "e");
+  rect(700, 40, 870, 50, "#090d16", "#fff");
+  rect(870 - p2.energy * 1.7, 40, 870, 50, "#eab308");
+
+  if (state === "GAME_OVER") {
+    const winner = p2.hp <= 0 ? p1.name : p2.name;
+    text(450, 230, `\u{1F3C6} ${winner.toUpperCase()} WINS! \u{1F3C6}`, px(32) + "px " + IMPACT, "#fde047");
+    text(450, 280, "Tap Screen / Press [R] to Return", "bold " + px(12) + "px " + ARIAL, "#fff");
+  }
+}
+
+function draw() {
+  ctx.fillStyle = "#0f172a"; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  if (state === "SELECT") drawSelect();
+  else {
+    drawArena(); drawProjectiles(); drawStickman(p1); drawStickman(p2);
+    drawTouchControls(); drawHud();
+  }
+}
+
+/* ---------- resize ---------- */
+function resize() {
+  const availW = window.innerWidth, availH = window.innerHeight - 16;
+  const s = Math.max(0.1, Math.min(availW / WIDTH, availH / HEIGHT));
+  const cssW = Math.floor(WIDTH * s), cssH = Math.floor(HEIGHT * s);
+  canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(canvas.width / WIDTH, 0, 0, canvas.height / HEIGHT, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ---------- fixed-timestep loop (20 ms, as tk after(20)) ---------- */
+let acc = 0, last = performance.now();
+function frame(now) {
+  acc += Math.min(now - last, 250);
+  last = now;
+  while (acc >= TICK_MS) { acc -= TICK_MS; tick(); }
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// test hook
+window.__sm = { get state() { return state; }, get p1() { return p1; }, get p2() { return p2; } };
+})();
+</script>
+</body>
+</html>

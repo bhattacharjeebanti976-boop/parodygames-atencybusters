@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>Flappy Bird</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#111;overflow:hidden;
+    overscroll-behavior:none;touch-action:none;-webkit-touch-callout:none;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    box-sizing:border-box}
+  canvas{display:block;touch-action:none;background:#70c5ce;outline:none}
+  .ui{position:fixed;z-index:5;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;
+    color:#fff;opacity:.55;font:600 14px/1 Arial,sans-serif;text-decoration:none;background:rgba(0,0,0,.35);
+    border:0;border-radius:10px;touch-action:manipulation;cursor:pointer;padding:0 12px;
+    -webkit-user-select:none;user-select:none}
+  .ui:hover,.ui:active{opacity:.9}
+  #back{top:calc(env(safe-area-inset-top) + 6px);left:calc(env(safe-area-inset-left) + 6px)}
+  #fs{top:calc(env(safe-area-inset-top) + 6px);right:calc(env(safe-area-inset-right) + 6px);font-size:20px;padding:0}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="400" height="600"></canvas></div>
+<a class="ui" id="back" href="../../index.html">&larr; Back</a>
+<button class="ui" id="fs" type="button" aria-label="Fullscreen">&#x26F6;</button>
+<script>
+(function(){
+"use strict";
+// ---- configuration (identical to original) ----
+var WIDTH=400, HEIGHT=600, GROUND_Y=550, GRAVITY=0.5, JUMP_STRENGTH=-8.5,
+    PIPE_SPEED=3, PIPE_GAP=150, SPAWN_INTERVAL=90, STEP_MS=20;
+
+var canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+
+// ---- bird image ----
+var birdImg=new Image(), birdOK=false;
+birdImg.onload=function(){birdOK=true;};
+birdImg.onerror=function(){birdOK=false;};
+birdImg.src='bird.png';
+
+// ---- audio ----
+var AC=window.AudioContext||window.webkitAudioContext, actx=null, buffers={};
+function initAudio(){
+  if(!AC) return;
+  try{
+    if(!actx){
+      actx=new AC();
+      ['jump','die'].forEach(function(n){
+        try{
+          fetch(n+'.mp3').then(function(r){if(!r.ok)throw 0;return r.arrayBuffer();})
+          .then(function(b){return new Promise(function(res,rej){actx.decodeAudioData(b,res,rej);});})
+          .then(function(buf){buffers[n]=buf;}).catch(function(){});
+        }catch(e){}
+      });
+    }
+    if(actx.state==='suspended') actx.resume();
+  }catch(e){}
+}
+function beep(freq,dur,type,slideTo){
+  var t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
+  o.type=type; o.frequency.setValueAtTime(freq,t);
+  if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo,t+dur);
+  g.gain.setValueAtTime(0.15,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t+dur);
+}
+function playSound(n){
+  try{
+    if(!actx||actx.state!=='running') return;
+    if(buffers[n]){
+      var s=actx.createBufferSource(); s.buffer=buffers[n]; s.connect(actx.destination); s.start(0);
+    } else if(n==='jump') beep(420,0.12,'square',760);
+    else beep(300,0.35,'sawtooth',70);
+  }catch(e){}
+}
+
+// ---- game state ----
+var state='MENU', birdX=80, birdY=Math.floor(HEIGHT/2), birdVY=0, pipes=[], score=0, frameCount=0;
+
+function resetGame(){
+  birdY=Math.floor(HEIGHT/2); birdVY=0; pipes=[]; score=0; frameCount=0; state='PLAYING';
+}
+function onAction(){
+  if(state==='MENU') resetGame();
+  else if(state==='PLAYING'){ birdVY=JUMP_STRENGTH; playSound('jump'); }
+  else if(state==='GAMEOVER') resetGame();
+}
+function spawnPipe(){
+  var lo=120, hi=GROUND_Y-120-PIPE_GAP;
+  pipes.push({x:WIDTH, gap_y:lo+Math.floor(Math.random()*(hi-lo+1)), passed:false});
+}
+function checkCollision(){
+  var r=14;
+  if(birdY+r>=GROUND_Y || birdY-r<=0) return true;
+  var bl=birdX-r, br=birdX+r, bt=birdY-r, bb=birdY+r;
+  for(var i=0;i<pipes.length;i++){
+    var p=pipes[i], px1=p.x, px2=p.x+60, tb=p.gap_y, bp=p.gap_y+PIPE_GAP;
+    if(br>px1 && bl<px2){ if(bt<tb || bb>bp) return true; }
+  }
+  return false;
+}
+function update(){
+  if(state!=='PLAYING') return;
+  birdVY+=GRAVITY; birdY+=birdVY;
+  frameCount++;
+  if(frameCount>=SPAWN_INTERVAL){ spawnPipe(); frameCount=0; }
+  for(var i=0;i<pipes.length;i++){
+    var p=pipes[i]; p.x-=PIPE_SPEED;
+    if(!p.passed && p.x+60<birdX){ score++; p.passed=true; }
+  }
+  pipes=pipes.filter(function(p){return p.x>-70;});
+  if(checkCollision()){ state='GAMEOVER'; playSound('die'); }
+}
+
+// ---- drawing (tk pt -> px at 96dpi: *4/3) ----
+var IMPACT='Impact, Haettenschweiler, "Arial Narrow Bold", "Roboto Condensed", sans-serif';
+function txt(s,x,y,font,color){
+  ctx.font=font; ctx.fillStyle=color; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(s,x,y);
+}
+function draw(){
+  ctx.fillStyle='#70c5ce'; ctx.fillRect(0,0,WIDTH,HEIGHT);
+  ctx.lineWidth=3; ctx.fillStyle='#73bf2e'; ctx.strokeStyle='#538c1f'; ctx.lineJoin='miter';
+  pipes.forEach(function(p){
+    var px=p.x, g=p.gap_y;
+    ctx.fillRect(px,0,60,g); ctx.strokeRect(px,0,60,g);
+    ctx.fillRect(px,g+PIPE_GAP,60,GROUND_Y-(g+PIPE_GAP)); ctx.strokeRect(px,g+PIPE_GAP,60,GROUND_Y-(g+PIPE_GAP));
+  });
+  ctx.fillStyle='#ded895'; ctx.fillRect(0,GROUND_Y,WIDTH,HEIGHT-GROUND_Y);
+  ctx.strokeStyle='#000'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,GROUND_Y); ctx.lineTo(WIDTH,GROUND_Y); ctx.stroke();
+
+  var by=Math.trunc(birdY);
+  if(birdOK){
+    ctx.drawImage(birdImg,birdX-20,by-15,40,30);
+  } else {
+    ctx.fillStyle='#facc15'; ctx.strokeStyle='#000'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(birdX,by,15,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(birdX+7.5,by-3.5,2.5,2.5,0,0,Math.PI*2); ctx.fill();
+  }
+  var cx=WIDTH/2;
+  if(state==='PLAYING'){
+    txt(String(score),cx,40,'48px '+IMPACT,'#ffffff');
+  } else if(state==='MENU'){
+    txt('FLAPPY BIRD',cx,180,'42.67px '+IMPACT,'#ffffff');
+    txt('Tap or press Space to Start',cx,240,'bold 18.67px Arial, Helvetica, sans-serif','#000000');
+  } else {
+    txt('GAME OVER',cx,160,'45.33px '+IMPACT,'#ef4444');
+    txt('Score: '+score,cx,220,'bold 21.33px Arial, Helvetica, sans-serif','#ffffff');
+    txt('Tap or press Space to Restart',cx,270,'bold 18.67px Arial, Helvetica, sans-serif','#000000');
+  }
+}
+
+// ---- loop: fixed 20 ms timestep ----
+var last=0, acc=0;
+function frame(t){
+  if(!last) last=t;
+  var d=t-last; last=t;
+  if(d>250) d=250;
+  acc+=d;
+  while(acc>=STEP_MS){ update(); acc-=STEP_MS; }
+  draw();
+  requestAnimationFrame(frame);
+}
+document.addEventListener('visibilitychange',function(){last=0;});
+
+// ---- resize ----
+function resize(){
+  var vw=window.innerWidth, vh=window.innerHeight, cs=getComputedStyle(document.documentElement);
+  var wrap=document.getElementById('wrap'), ws=getComputedStyle(wrap);
+  var aw=wrap.clientWidth-parseFloat(ws.paddingLeft)-parseFloat(ws.paddingRight);
+  var ah=wrap.clientHeight-parseFloat(ws.paddingTop)-parseFloat(ws.paddingBottom);
+  var s=Math.min(aw/WIDTH, ah/HEIGHT); if(!(s>0)) s=1;
+  var w=Math.floor(WIDTH*s), h=Math.floor(HEIGHT*s), dpr=window.devicePixelRatio||1;
+  canvas.style.width=w+'px'; canvas.style.height=h+'px';
+  canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
+  ctx.setTransform(canvas.width/WIDTH,0,0,canvas.height/HEIGHT,0,0);
+}
+window.addEventListener('resize',resize);
+window.addEventListener('orientationchange',function(){setTimeout(resize,150);});
+if(window.visualViewport) window.visualViewport.addEventListener('resize',resize);
+
+// ---- input ----
+function isUI(t){return t && t.closest && t.closest('.ui');}
+window.addEventListener('pointerdown',function(e){
+  if(isUI(e.target)) return;
+  if(e.pointerType==='mouse' && e.button!==0) return;
+  e.preventDefault(); initAudio(); onAction();
+},{passive:false});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'||e.key===' '){ e.preventDefault(); if(e.repeat) return; initAudio(); onAction(); }
+});
+document.addEventListener('contextmenu',function(e){e.preventDefault();});
+document.addEventListener('touchmove',function(e){e.preventDefault();},{passive:false});
+document.addEventListener('gesturestart',function(e){e.preventDefault();});
+document.getElementById('back').addEventListener('pointerdown',function(e){e.stopPropagation();});
+var fs=document.getElementById('fs');
+fs.addEventListener('click',function(e){
+  e.stopPropagation();
+  try{
+    var el=document.documentElement;
+    if(document.fullscreenElement||document.webkitFullscreenElement){
+      (document.exitFullscreen||document.webkitExitFullscreen).call(document);
+    } else {
+      var f=el.requestFullscreen||el.webkitRequestFullscreen;
+      if(f){ var p=f.call(el); if(p&&p.catch) p.catch(function(){}); }
+    }
+  }catch(err){}
+});
+fs.addEventListener('keydown',function(e){ if(e.code==='Space') e.stopPropagation(); });
+
+resize(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

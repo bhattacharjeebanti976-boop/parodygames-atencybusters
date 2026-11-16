@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Space Invaders</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #02040a; overflow: hidden; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center;
+         font-family: Arial, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #back { position: fixed; top: 6px; left: 8px; z-index: 5; font-size: 12px; color: #64748b;
+          text-decoration: none; opacity: .75; padding: 4px 6px; }
+  #back:hover { color: #38bdf8; opacity: 1; }
+  #stage { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas { background: #050814; display: block; touch-action: none; cursor: crosshair; }
+  #touch { display: none; width: 100%; box-sizing: border-box; padding: 8px 16px 14px; gap: 12px;
+           justify-content: space-between; align-items: center; }
+  #touch button { flex: 1; height: 64px; font-size: 22px; font-weight: bold; color: #38bdf8; background: #1e293b;
+                  border: 2px solid #38bdf8; border-radius: 12px; touch-action: none; -webkit-tap-highlight-color: transparent; }
+  #touch button#bf { color: #facc15; border-color: #facc15; flex: 1.4; }
+  #touch button.on { background: #334155; }
+  @media (hover: none) and (pointer: coarse) { #touch { display: flex; } }
+  body.touch #touch { display: flex; }
+</style>
+</head>
+<body>
+<a id="back" href="../../index.html">&larr; Back to Parody Games</a>
+<div id="stage"><canvas id="c" width="400" height="600"></canvas></div>
+<div id="touch">
+  <button id="bl" aria-label="Left">&#9664;</button>
+  <button id="bf" aria-label="Fire">FIRE</button>
+  <button id="br" aria-label="Right">&#9654;</button>
+</div>
+<script>
+(function () {
+"use strict";
+const WIDTH = 400, HEIGHT = 600;
+const GAME_FPS = 30;            // tkinter after() delay in ms -> fixed timestep
+const PLAYER_SPEED = 8, LASER_SPEED = 12, INITIAL_ENEMY_SPEED = 2.0;
+const ENEMY_ROWS = 4, ENEMY_COLS = 6;
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+// ---------- Assets ----------
+function loadImg(src) {
+  const im = new Image();
+  const o = { img: im, ok: false };
+  im.onload = () => { o.ok = true; };
+  im.onerror = () => { o.ok = false; };
+  im.src = src;
+  return o;
+}
+const playerImg = loadImg("player.png");
+const enemyImg = loadImg("enemy.png");
+
+// ---------- Audio ----------
+let actx = null;
+const buffers = {};
+const files = { laser: "laser.mp3", explosion: "explosion.mp3" };
+function initAudio() {
+  if (actx) { if (actx.state === "suspended") actx.resume(); return; }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    actx = new AC();
+    Object.keys(files).forEach(k => {
+      fetch(files[k]).then(r => { if (!r.ok) throw 0; return r.arrayBuffer(); })
+        .then(b => new Promise((res, rej) => actx.decodeAudioData(b, res, rej)))
+        .then(d => { buffers[k] = d; })
+        .catch(() => {});
+    });
+  } catch (e) { actx = null; }
+}
+function beep(type) {
+  // fallback beep (original: 1000Hz laser / 250Hz other, 50ms)
+  try {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.value = type === "laser" ? 1000 : 250;
+    g.gain.value = 0.05;
+    o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime + 0.05);
+  } catch (e) {}
+}
+function playSound(type) {
+  if (!actx) return;
+  try {
+    const b = buffers[type];
+    if (!b) { beep(type); return; }
+    const s = actx.createBufferSource();
+    s.buffer = b; s.connect(actx.destination); s.start();
+  } catch (e) {}
+}
+
+// ---------- Game state ----------
+const stars = [];
+for (let i = 0; i < 40; i++) {
+  stars.push([Math.floor(Math.random() * (WIDTH + 1)), Math.floor(Math.random() * (HEIGHT + 1))]);
+}
+let state = "MENU", score = 0, wave = 1;
+let playerX = WIDTH / 2 | 0, playerY = HEIGHT - 50;
+let moveLeft = false, moveRight = false, fireCooldown = 0;
+let lasers = [], enemies = [], enemyDir = 1, enemySpeed = INITIAL_ENEMY_SPEED;
+
+function startNewGame() { score = 0; wave = 1; startWave(); }
+function startWave() {
+  playerX = WIDTH / 2 | 0;
+  lasers.length = 0;
+  enemySpeed = INITIAL_ENEMY_SPEED + (wave - 1) * 0.8;
+  enemyDir = 1;
+  spawnEnemies();
+  state = "PLAYING";
+}
+function spawnEnemies() {
+  enemies = [];
+  for (let r = 0; r < ENEMY_ROWS; r++)
+    for (let c = 0; c < ENEMY_COLS; c++)
+      enemies.push({ x: 45 + c * 52, y: 80 + r * 38, alive: true });
+}
+function fireLaser() {
+  if (state === "PLAYING" && fireCooldown <= 0) {
+    lasers.push({ x: playerX, y: playerY - 20 });
+    playSound("laser");
+    fireCooldown = 5;
+  }
+}
+function handleAction() {
+  if (state === "MENU" || state === "GAMEOVER") startNewGame();
+  else if (state === "PLAYING") fireLaser();
+}
+
+function update() {
+  if (fireCooldown > 0) fireCooldown--;
+  if (moveLeft) playerX = Math.max(20, playerX - PLAYER_SPEED);
+  if (moveRight) playerX = Math.min(WIDTH - 20, playerX + PLAYER_SPEED);
+
+  for (const l of lasers.slice()) {
+    l.y -= LASER_SPEED;
+    if (l.y < 0) lasers.splice(lasers.indexOf(l), 1);
+  }
+
+  let hitWall = false;
+  const alive = enemies.filter(e => e.alive);
+  if (!alive.length) { wave++; startWave(); return; }
+
+  for (const e of alive) {
+    e.x += enemySpeed * enemyDir;
+    if (e.x >= WIDTH - 20 || e.x <= 20) hitWall = true;
+  }
+  if (hitWall) {
+    enemyDir *= -1;
+    for (const e of alive) {
+      e.y += 16;
+      if (e.y >= playerY - 25) { state = "GAMEOVER"; playSound("explosion"); return; }
+    }
+  }
+
+  for (const l of lasers.slice()) {
+    for (const e of alive) {
+      if (Math.abs(l.x - e.x) < 20 && Math.abs(l.y - e.y) < 20) {
+        e.alive = false;
+        const i = lasers.indexOf(l);
+        if (i >= 0) lasers.splice(i, 1);
+        score += 100;
+        playSound("explosion");
+        break;
+      }
+    }
+  }
+}
+
+// ---------- Drawing ----------
+function rect(x0, y0, x1, y1, fill, outline, w) {
+  ctx.fillStyle = fill; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  if (outline) { ctx.strokeStyle = outline; ctx.lineWidth = w; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0); }
+}
+function text(x, y, s, pt, bold, color) {
+  ctx.font = (bold ? "bold " : "") + Math.round(pt * 4 / 3) + "px Arial, Helvetica, sans-serif";
+  ctx.fillStyle = color; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(s, x, y);
+}
+function draw() {
+  ctx.fillStyle = "#050814"; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.fillStyle = "#ffffff";
+  for (const [sx, sy] of stars) ctx.fillRect(sx, sy, 2, 2);
+
+  rect(0, 0, WIDTH, 45, "#1e293b");
+  text(60, 22, "SCORE: " + score, 12, true, "#38bdf8");
+  text(340, 22, "WAVE: " + wave, 12, true, "#facc15");
+
+  if (state === "PLAYING" || state === "GAMEOVER") {
+    if (playerImg.ok) ctx.drawImage(playerImg.img, playerX - 20, playerY - 20, 40, 40);
+    else {
+      ctx.beginPath();
+      ctx.moveTo(playerX, playerY - 16); ctx.lineTo(playerX - 16, playerY + 14); ctx.lineTo(playerX + 16, playerY + 14);
+      ctx.closePath(); ctx.fillStyle = "#38bdf8"; ctx.fill();
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.lineJoin = "miter"; ctx.stroke();
+    }
+    ctx.strokeStyle = "#facc15"; ctx.lineWidth = 3;
+    for (const l of lasers) { ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(l.x, l.y - 10); ctx.stroke(); }
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if (enemyImg.ok) ctx.drawImage(enemyImg.img, e.x - 16, e.y - 16, 32, 32);
+      else {
+        ctx.beginPath(); ctx.arc(e.x, e.y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = "#ef4444"; ctx.fill();
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1; ctx.stroke();
+      }
+    }
+  }
+
+  if (state === "MENU") {
+    rect(30, 180, 370, 380, "#1e293b", "#38bdf8", 3);
+    text(200, 230, "SPACE INVADERS", 20, true, "#38bdf8");
+    text(200, 280, "Tap or Press SPACE to Start", 12, true, "#ffffff");
+    text(200, 330, "Arrow Keys / Touch to Move", 10, false, "#94a3b8");
+  } else if (state === "GAMEOVER") {
+    rect(30, 180, 370, 380, "#1e293b", "#ef4444", 3);
+    text(200, 230, "GAME OVER", 22, true, "#ef4444");
+    text(200, 280, "Final Score: " + score, 14, true, "#ffffff");
+    text(200, 330, "Tap or Press SPACE to Play Again", 11, true, "#38bdf8");
+  }
+}
+
+// ---------- Loop: fixed timestep (30 ms) ----------
+let last = performance.now(), acc = 0;
+function frame(now) {
+  acc += Math.min(now - last, 250); last = now;
+  while (acc >= GAME_FPS) { acc -= GAME_FPS; if (state === "PLAYING") update(); }
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------- Input ----------
+window.addEventListener("keydown", e => {
+  initAudio();
+  const k = e.key;
+  if (k === "ArrowLeft" || k === "a") { moveLeft = true; e.preventDefault(); }
+  else if (k === "ArrowRight" || k === "d") { moveRight = true; e.preventDefault(); }
+  else if (k === " " || e.code === "Space") { handleAction(); e.preventDefault(); }
+});
+window.addEventListener("keyup", e => {
+  const k = e.key;
+  if (k === "ArrowLeft" || k === "a") moveLeft = false;
+  else if (k === "ArrowRight" || k === "d") moveRight = false;
+});
+window.addEventListener("blur", () => { moveLeft = moveRight = false; });
+
+function canvasX(ev) {
+  const r = canvas.getBoundingClientRect();
+  return (ev.clientX - r.left) * WIDTH / r.width;
+}
+function touchMove(ev) {
+  if (state === "PLAYING") playerX = Math.max(20, Math.min(WIDTH - 20, Math.trunc(canvasX(ev))));
+}
+canvas.addEventListener("pointermove", touchMove);
+canvas.addEventListener("pointerdown", ev => {
+  initAudio();
+  if (ev.pointerType !== "mouse") touchMove(ev);
+  handleAction();
+  ev.preventDefault();
+});
+
+// Touch buttons
+function bindBtn(id, down, up) {
+  const b = document.getElementById(id);
+  b.addEventListener("pointerdown", ev => { initAudio(); b.classList.add("on"); down(); ev.preventDefault(); });
+  const rel = () => { b.classList.remove("on"); up(); };
+  b.addEventListener("pointerup", rel); b.addEventListener("pointercancel", rel); b.addEventListener("pointerleave", rel);
+}
+let fireTimer = null;
+bindBtn("bl", () => { moveLeft = true; }, () => { moveLeft = false; });
+bindBtn("br", () => { moveRight = true; }, () => { moveRight = false; });
+bindBtn("bf", () => { handleAction(); clearInterval(fireTimer); fireTimer = setInterval(() => { if (state === "PLAYING") fireLaser(); }, GAME_FPS); },
+              () => { clearInterval(fireTimer); fireTimer = null; });
+if ("ontouchstart" in window || navigator.maxTouchPoints > 0) {
+  if (window.matchMedia && matchMedia("(pointer: coarse)").matches) document.body.classList.add("touch");
+}
+
+// ---------- Scaling ----------
+function resize() {
+  const stage = document.getElementById("stage");
+  const aw = stage.clientWidth, ah = stage.clientHeight;
+  const s = Math.max(0.1, Math.min(aw / WIDTH, ah / HEIGHT));
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = WIDTH * s + "px"; canvas.style.height = HEIGHT * s + "px";
+  canvas.width = Math.round(WIDTH * s * dpr); canvas.height = Math.round(HEIGHT * s * dpr);
+  ctx.setTransform(canvas.width / WIDTH, 0, 0, canvas.height / HEIGHT, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+window.__game = { get state() { return state; }, get score() { return score; } };
+})();
+</script>
+</body>
+</html>

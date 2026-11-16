@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b14">
+<title>Panti Chor Pikai</title>
+<style>
+:root{--bg:#0b0b14;}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;}
+html,body{margin:0;height:100%;background:var(--bg);overscroll-behavior:none;overflow:hidden;touch-action:none;font-family:Arial,Helvetica,sans-serif;}
+body{display:flex;flex-direction:column;height:100dvh;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);}
+#bar{flex:0 0 44px;display:flex;justify-content:space-between;align-items:center;}
+#bar a,#bar button{min-width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:14px;text-decoration:none;background:none;border:0;padding:0 12px;cursor:pointer;opacity:.75;font-family:inherit;}
+#bar a:hover,#bar button:hover{opacity:1;color:#fff;}
+#main{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;}
+canvas{display:block;touch-action:none;background:#1e1b4b;}
+#pad{flex:0 0 auto;display:none;gap:16px;padding:8px 16px 12px;}
+#pad button{flex:1;height:72px;min-width:48px;font-size:34px;color:#fff;background:#1f2937;border:2px solid #ec4899;border-radius:14px;touch-action:none;font-family:inherit;}
+#pad button.on{background:#ec4899;}
+@media (pointer:coarse){#pad{display:flex;}}
+</style>
+</head>
+<body>
+<div id="bar"><a href="../../index.html">&larr; Back</a><button id="fs" aria-label="Fullscreen" title="Fullscreen">&#x26F6;</button></div>
+<div id="main"><canvas id="c" width="500" height="650"></canvas></div>
+<div id="pad"><button id="bl" aria-label="Left">&#9664;</button><button id="br" aria-label="Right">&#9654;</button></div>
+<script>
+(function(){
+"use strict";
+var WIDTH=500,HEIGHT=650,TICK=30;
+var cv=document.getElementById('c'),ctx=cv.getContext('2d');
+var main=document.getElementById('main');
+
+// ---------- assets ----------
+function loadImg(src){var i=new Image();i.ok=false;i.onload=function(){i.ok=true;};i.onerror=function(){i.ok=false;};i.src=src;return i;}
+var bgImg=loadImg('background.png'),playerImg=loadImg('player.png'),pantiImg=loadImg('panti.png'),bombImg=loadImg('bomb.png');
+
+// ---------- audio ----------
+var AC=null,buffers={},FILES={catch:'catch.mp3',bomb_hit:'bomb_hit.mp3',gameover:'gameover.mp3'};
+var BEEP={catch:[900,.05],bomb_hit:[200,.12],gameover:[140,.4]};
+function initAudio(){
+  if(AC){try{if(AC.state==='suspended')AC.resume();}catch(e){}return;}
+  try{
+    var C=window.AudioContext||window.webkitAudioContext;if(!C)return;
+    AC=new C();AC.resume&&AC.resume();
+    var o=AC.createOscillator(),g=AC.createGain();g.gain.value=0;o.connect(g);g.connect(AC.destination);o.start();o.stop(AC.currentTime+0.01);
+    Object.keys(FILES).forEach(function(k){
+      fetch(FILES[k]).then(function(r){if(!r.ok)throw 0;return r.arrayBuffer();}).then(function(b){
+        return new Promise(function(res,rej){AC.decodeAudioData(b,res,rej);});
+      }).then(function(buf){buffers[k]=buf;}).catch(function(){});
+    });
+  }catch(e){AC=null;}
+}
+function playSound(t){
+  try{
+    if(!AC||AC.state!=='running')return;
+    if(buffers[t]){var s=AC.createBufferSource();s.buffer=buffers[t];s.connect(AC.destination);s.start();return;}
+    var b=BEEP[t],o=AC.createOscillator(),g=AC.createGain();
+    o.type='square';o.frequency.value=b[0];g.gain.value=.08;
+    o.connect(g);g.connect(AC.destination);o.start();o.stop(AC.currentTime+b[1]);
+  }catch(e){}
+}
+
+// ---------- game state ----------
+var G={px:WIDTH>>1,py:HEIGHT-60,speed:12,hp:100,maxHp:100,score:0,items:[],spawn:0,state:'MENU'};
+var keys={Left:false,Right:false,a:false,d:false};
+var pad={l:false,r:false};
+
+function startGame(){G.hp=100;G.score=0;G.px=WIDTH>>1;G.items=[];G.spawn=0;G.state='PLAYING';}
+function handleAction(){if(G.state==='MENU'||G.state==='GAMEOVER')startGame();}
+function randint(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function spawnItem(){
+  var type=Math.random()<0.35?'bomb':'panti';
+  var speed=4.5+Math.random()*3+G.score*0.02;
+  G.items.push({x:randint(40,WIDTH-40),y:-40,type:type,speed:speed});
+}
+function update(){
+  var L=keys.Left||keys.a||pad.l,R=keys.Right||keys.d||pad.r;
+  if(L)G.px=Math.max(32,G.px-G.speed);
+  if(R)G.px=Math.min(WIDTH-32,G.px+G.speed);
+  G.spawn++;
+  var rate=Math.max(10,30-Math.trunc(G.score*0.1));
+  if(G.spawn>=rate){G.spawn=0;spawnItem();}
+  var list=G.items.slice();
+  for(var n=0;n<list.length;n++){
+    var it=list[n];it.y+=it.speed;
+    var dx=Math.abs(it.x-G.px),dy=Math.abs(it.y-G.py);
+    var cw=it.type==='panti'?50:40,ch=it.type==='panti'?45:35;
+    if(dx<cw&&dy<ch){
+      if(it.type==='panti'){G.score+=10;playSound('catch');}
+      else{
+        G.hp-=25;playSound('bomb_hit');
+        if(G.hp<=0){G.hp=0;G.state='GAMEOVER';playSound('gameover');return;}
+      }
+      G.items.splice(G.items.indexOf(it),1);continue;
+    }
+    if(it.y>HEIGHT+50)G.items.splice(G.items.indexOf(it),1);
+  }
+}
+
+// ---------- drawing ----------
+function rect(x1,y1,x2,y2,fill,outline,w){
+  if(fill){ctx.fillStyle=fill;ctx.fillRect(x1,y1,x2-x1,y2-y1);}
+  if(outline){ctx.lineWidth=w||1;ctx.strokeStyle=outline;ctx.strokeRect(x1,y1,x2-x1,y2-y1);}
+}
+function oval(x1,y1,x2,y2,fill,outline,w){
+  ctx.beginPath();ctx.ellipse((x1+x2)/2,(y1+y2)/2,(x2-x1)/2,(y2-y1)/2,0,0,Math.PI*2);
+  ctx.fillStyle=fill;ctx.fill();
+  if(outline){ctx.lineWidth=w;ctx.strokeStyle=outline;ctx.stroke();}
+}
+function text(x,y,s,pt,bold,color){
+  ctx.font=(bold?'bold ':'')+Math.round(pt*4/3)+'px Arial, Helvetica, sans-serif';
+  ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';
+  var lines=s.split('\n'),lh=Math.round(pt*4/3*1.2),y0=y-(lines.length-1)*lh/2;
+  for(var i=0;i<lines.length;i++)ctx.fillText(lines[i],x,y0+i*lh);
+}
+function img(im,x,y,w,h){ctx.drawImage(im,x-w/2,y-h/2,w,h);}
+function draw(){
+  ctx.clearRect(0,0,WIDTH,HEIGHT);
+  if(bgImg.ok)ctx.drawImage(bgImg,0,0,WIDTH,HEIGHT);else rect(0,0,WIDTH,HEIGHT,'#1e1b4b');
+  rect(0,0,WIDTH,50,'#0f172a');
+  rect(20.5,15.5,170.5,35.5,'#374151','#4b5563',1);
+  var r=Math.max(0,G.hp/G.maxHp);
+  rect(20,15,20+150*r,35,r>0.5?'#22c55e':(r>0.25?'#eab308':'#ef4444'));
+  text(95,25,'HP: '+G.hp+'/'+G.maxHp,9,true,'#ffffff');
+  text(WIDTH-80,25,'SCORE: '+G.score,14,true,'#facc15');
+  if(G.state==='PLAYING'||G.state==='GAMEOVER'){
+    G.items.forEach(function(it){
+      if(it.type==='panti'){
+        if(pantiImg.ok)img(pantiImg,it.x,it.y,70,70);
+        else{oval(it.x-28,it.y-24,it.x+28,it.y+24,'#ec4899','#ffffff',2);text(it.x,it.y,'V',16,true,'#ffffff');}
+      }else{
+        if(bombImg.ok)img(bombImg,it.x,it.y,40,40);
+        else{
+          oval(it.x-18,it.y-18,it.x+18,it.y+18,'#111827','#ef4444',2);
+          ctx.beginPath();ctx.moveTo(it.x,it.y-18);ctx.lineTo(it.x+6,it.y-25);ctx.lineWidth=3;ctx.strokeStyle='#f97316';ctx.stroke();
+        }
+      }
+    });
+    if(playerImg.ok)img(playerImg,G.px,G.py,64,64);
+    else{rect(G.px-30,G.py-20,G.px+30,G.py+20,'#3b82f6','#ffffff',2);text(G.px,G.py,'CHOR',9,true,'#ffffff');}
+  }
+  if(G.state==='MENU'){
+    rect(40,180,460,440,'#0f172a','#ec4899',3);
+    text(WIDTH/2,230,'PANTI CHOR PIKAI',22,true,'#ec4899');
+    text(WIDTH/2,290,'Catch Pantis = +10 Points\nAvoid Bombs = Lose HP\n\nControls: Mouse or A/D / Left-Right',11,false,'#ffffff');
+    text(WIDTH/2,390,'Click or Press SPACE to Start',12,true,'#facc15');
+  }else if(G.state==='GAMEOVER'){
+    rect(40,200,460,420,'#0f172a','#ef4444',3);
+    text(WIDTH/2,240,'GAME OVER',24,true,'#ef4444');
+    text(WIDTH/2,295,'Final Score: '+G.score,14,true,'#ffffff');
+    text(WIDTH/2,360,'Click or Press SPACE to Play Again',12,true,'#3b82f6');
+  }
+}
+
+// ---------- loop (fixed 30ms step) ----------
+var last=0,acc=0;
+function frame(t){
+  if(!last)last=t;
+  acc+=Math.min(t-last,250);last=t;
+  while(acc>=TICK){acc-=TICK;if(G.state==='PLAYING')update();}
+  draw();
+  requestAnimationFrame(frame);
+}
+
+// ---------- resize ----------
+function resize(){
+  var w=main.clientWidth,h=main.clientHeight;
+  var s=Math.min(w/WIDTH,h/HEIGHT);if(!(s>0))return;
+  var cw=Math.floor(WIDTH*s),ch=Math.floor(HEIGHT*s),d=window.devicePixelRatio||1;
+  cv.style.width=cw+'px';cv.style.height=ch+'px';
+  cv.width=Math.round(cw*d);cv.height=Math.round(ch*d);
+  ctx.setTransform(cv.width/WIDTH,0,0,cv.height/HEIGHT,0,0);
+}
+window.addEventListener('resize',resize);
+window.addEventListener('orientationchange',function(){setTimeout(resize,200);});
+if(window.ResizeObserver)new ResizeObserver(resize).observe(main);
+document.addEventListener('fullscreenchange',function(){setTimeout(resize,100);});
+
+// ---------- input ----------
+function mapX(e){var r=cv.getBoundingClientRect();return (e.clientX-r.left)*WIDTH/r.width;}
+function moveTo(e){if(G.state==='PLAYING')G.px=Math.max(32,Math.min(WIDTH-32,mapX(e)));}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();initAudio();
+  try{cv.setPointerCapture(e.pointerId);}catch(x){}
+  var was=G.state;handleAction();
+  if(was==='PLAYING')moveTo(e);
+});
+cv.addEventListener('pointermove',function(e){e.preventDefault();moveTo(e);});
+['contextmenu','dragstart','selectstart'].forEach(function(n){document.addEventListener(n,function(e){e.preventDefault();});});
+document.addEventListener('touchmove',function(e){e.preventDefault();},{passive:false});
+
+window.addEventListener('keydown',function(e){
+  initAudio();
+  var k=e.key.length===1?e.key.toLowerCase():e.key;
+  if(k==='ArrowLeft')k='Left';else if(k==='ArrowRight')k='Right';
+  if(k in keys){keys[k]=true;e.preventDefault();}
+  else if(e.code==='Space'||e.key===' '){e.preventDefault();handleAction();}
+});
+window.addEventListener('keyup',function(e){
+  var k=e.key.length===1?e.key.toLowerCase():e.key;
+  if(k==='ArrowLeft')k='Left';else if(k==='ArrowRight')k='Right';
+  if(k in keys)keys[k]=false;
+});
+window.addEventListener('blur',function(){keys.Left=keys.Right=keys.a=keys.d=false;pad.l=pad.r=false;});
+
+function holdBtn(id,prop){
+  var b=document.getElementById(id);
+  function on(e){e.preventDefault();initAudio();pad[prop]=true;b.classList.add('on');try{b.setPointerCapture(e.pointerId);}catch(x){}}
+  function off(e){pad[prop]=false;b.classList.remove('on');}
+  b.addEventListener('pointerdown',on);
+  ['pointerup','pointercancel','lostpointercapture'].forEach(function(n){b.addEventListener(n,off);});
+}
+holdBtn('bl','l');holdBtn('br','r');
+// tapping the pad buttons also starts the game from menu / game over
+['bl','br'].forEach(function(id){document.getElementById(id).addEventListener('pointerdown',handleAction);});
+
+document.getElementById('fs').addEventListener('click',function(){
+  try{
+    var el=document.documentElement;
+    if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document);}
+    else{var p=(el.requestFullscreen||el.webkitRequestFullscreen).call(el);if(p&&p.catch)p.catch(function(){});}
+  }catch(e){}
+});
+
+resize();requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

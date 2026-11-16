@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Whack-a-Mole Custom</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f1411;overflow:hidden;overscroll-behavior:none}
+  body{display:flex;align-items:center;justify-content:center}
+  #wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;cursor:pointer}
+  #back{position:fixed;top:8px;left:10px;font:12px Arial,sans-serif;color:#7d8a82;text-decoration:none;opacity:.7;z-index:2}
+  #back:hover{opacity:1;text-decoration:underline}
+</style>
+</head>
+<body>
+<a id="back" href="../../index.html">&larr; Back to Parody Games</a>
+<div id="wrap"><canvas id="c" width="400" height="550"></canvas></div>
+<script>
+(function(){
+"use strict";
+// ===== CONFIGURATION (from original) =====
+var WIDTH=400, HEIGHT=550;
+var GAME_DURATION=30;
+var MOLE_POP_SPEED=800;
+var HOLE_COORDS=[[80,160],[200,160],[320,160],[80,270],[200,270],[320,270],[80,380],[200,380],[320,380]];
+var HOLE_RADIUS_X=45, HOLE_RADIUS_Y=25;
+// Tk font sizes are points; convert to CSS px at 96dpi
+function pt(n){return n*96/72;}
+var IMPACT="Impact, 'Arial Black', 'Haettenschweiler', sans-serif";
+var ARIAL="Arial, Helvetica, sans-serif";
+
+var canvas=document.getElementById('c');
+var ctx=canvas.getContext('2d');
+
+// ===== SOUND =====
+var audioCtx=null;
+function getAC(){
+  if(!audioCtx){ try{ var AC=window.AudioContext||window.webkitAudioContext; if(AC) audioCtx=new AC(); }catch(e){} }
+  return audioCtx;
+}
+function beep(type){
+  try{
+    var ac=getAC(); if(!ac) return;
+    if(ac.state==='suspended') ac.resume();
+    var o=ac.createOscillator(), g=ac.createGain();
+    o.type='square'; o.frequency.value=(type==='whack')?1000:350;
+    g.gain.value=0.08;
+    o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime+0.08);
+  }catch(e){}
+}
+var sounds={};
+['whack','miss'].forEach(function(n){
+  var a=new Audio(); a.preload='auto';
+  var rec={el:a,ok:true};
+  a.addEventListener('error',function(){rec.ok=false;});
+  a.src=n+'.mp3';
+  sounds[n]=rec;
+});
+function playSound(type){
+  var rec=sounds[type];
+  if(!rec||!rec.ok){beep(type);return;}
+  try{
+    var a=rec.el.cloneNode(); a.currentTime=0;
+    var p=a.play();
+    if(p&&p.catch) p.catch(function(){beep(type);});
+  }catch(e){beep(type);}
+}
+
+// ===== IMAGE =====
+var molePhoto=null;
+(function(){
+  var im=new Image();
+  im.onload=function(){molePhoto=im;draw();};
+  im.onerror=function(){molePhoto=null;};
+  im.src='mole.png';
+})();
+
+// ===== GAME STATE =====
+var gameState="MENU", score=0, timeLeft=GAME_DURATION, currentHole=null, popJob=null, timerJob=null;
+
+function startGame(){
+  score=0; timeLeft=GAME_DURATION; gameState="PLAYING";
+  scheduleNextMole(); updateTimer();
+}
+function updateTimer(){
+  if(gameState!=="PLAYING") return;
+  if(timeLeft>0){
+    timeLeft-=1; draw();
+    timerJob=setTimeout(updateTimer,1000);
+  } else endGame();
+}
+function scheduleNextMole(){
+  if(gameState!=="PLAYING") return;
+  var avail=[]; for(var i=0;i<HOLE_COORDS.length;i++) if(i!==currentHole) avail.push(i);
+  currentHole=avail[Math.floor(Math.random()*avail.length)];
+  draw();
+  popJob=setTimeout(hideMoleAndRepeat,MOLE_POP_SPEED);
+}
+function hideMoleAndRepeat(){
+  currentHole=null; draw();
+  var delay=200+Math.floor(Math.random()*401); // randint(200,600)
+  popJob=setTimeout(scheduleNextMole,delay);
+}
+function onCanvasClick(x,y){
+  if(gameState==="MENU"||gameState==="GAMEOVER"){
+    if(popJob) clearTimeout(popJob);
+    if(timerJob) clearTimeout(timerJob);
+    startGame(); return;
+  }
+  if(gameState==="PLAYING"){
+    var hit=false;
+    if(currentHole!==null){
+      var h=HOLE_COORDS[currentHole];
+      if(Math.sqrt((x-h[0])*(x-h[0])+(y-h[1])*(y-h[1]))<=40) hit=true;
+    }
+    if(hit){
+      score+=1; playSound("whack");
+      if(popJob) clearTimeout(popJob);
+      currentHole=null; draw();
+      popJob=setTimeout(scheduleNextMole,150);
+    } else playSound("miss");
+  }
+}
+function endGame(){
+  gameState="GAMEOVER"; currentHole=null;
+  if(popJob) clearTimeout(popJob);
+  draw();
+}
+
+// ===== DRAWING (tk canvas -> Canvas2D) =====
+function rect(x0,y0,x1,y1,fill,outline,w){
+  if(fill){ctx.fillStyle=fill;ctx.fillRect(x0,y0,x1-x0,y1-y0);}
+  if(outline){ctx.strokeStyle=outline;ctx.lineWidth=w||1;ctx.strokeRect(x0,y0,x1-x0,y1-y0);}
+}
+function oval(x0,y0,x1,y1,fill,outline,w){
+  ctx.beginPath();
+  ctx.ellipse((x0+x1)/2,(y0+y1)/2,(x1-x0)/2,(y1-y0)/2,0,0,Math.PI*2);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(outline){ctx.strokeStyle=outline;ctx.lineWidth=w||1;ctx.stroke();}
+}
+function text(x,y,s,font,fill){
+  ctx.font=font; ctx.fillStyle=fill; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText(s,x,y);
+}
+function draw(){
+  ctx.fillStyle="#4ade80"; ctx.fillRect(0,0,WIDTH,HEIGHT);
+
+  rect(0,0,WIDTH,80,"#15803d");
+  text(80,40,"Score: "+score,pt(22)+"px "+IMPACT,"#ffffff");
+  text(300,40,"Time: "+timeLeft+"s",pt(22)+"px "+IMPACT,"#ffffff");
+
+  HOLE_COORDS.forEach(function(h){
+    var x=h[0],y=h[1];
+    oval(x-HOLE_RADIUS_X-4,y-HOLE_RADIUS_Y-4,x+HOLE_RADIUS_X+4,y+HOLE_RADIUS_Y+4,"#78350f");
+    rect(x-HOLE_RADIUS_X,y-HOLE_RADIUS_Y,x+HOLE_RADIUS_X,y+HOLE_RADIUS_Y,"#271c19");
+  });
+
+  if(currentHole!==null){
+    var hx=HOLE_COORDS[currentHole][0], hy=HOLE_COORDS[currentHole][1], my=hy-25;
+    if(molePhoto){
+      ctx.drawImage(molePhoto,hx-35,my-35,70,70);
+    } else {
+      oval(hx-30,my-30,hx+30,my+30,"#b45309","#000",2);
+      oval(hx-12,my-10,hx-4,my-2,"#fff");
+      oval(hx+4,my-10,hx+12,my-2,"#fff");
+      oval(hx-10,my-8,hx-6,my-4,"#000");
+      oval(hx+6,my-8,hx+10,my-4,"#000");
+      oval(hx-8,my+2,hx+8,my+12,"#fbcfe8");
+    }
+  }
+
+  if(gameState==="MENU"){
+    rect(40,180,360,380,"#ffffff","#15803d",4);
+    text(WIDTH/2,230,"WHACK-A-MOLE",pt(28)+"px "+IMPACT,"#15803d");
+    text(WIDTH/2,290,"Tap anywhere to Start!","bold "+pt(14)+"px "+ARIAL,"#000000");
+    text(WIDTH/2,330,GAME_DURATION+" Seconds Round",pt(11)+"px "+ARIAL,"#666666");
+  } else if(gameState==="GAMEOVER"){
+    rect(40,180,360,380,"#ffffff","#ef4444",4);
+    text(WIDTH/2,220,"TIME'S UP!",pt(28)+"px "+IMPACT,"#ef4444");
+    text(WIDTH/2,270,"Final Score: "+score,"bold "+pt(18)+"px "+ARIAL,"#000000");
+    text(WIDTH/2,320,"Tap anywhere to Play Again","bold "+pt(14)+"px "+ARIAL,"#15803d");
+  }
+}
+
+// ===== SCALING / INPUT =====
+function resize(){
+  var s=Math.min(window.innerWidth/WIDTH,window.innerHeight/HEIGHT);
+  if(!(s>0)) s=1;
+  var dpr=window.devicePixelRatio||1;
+  canvas.style.width=(WIDTH*s)+"px"; canvas.style.height=(HEIGHT*s)+"px";
+  canvas.width=Math.round(WIDTH*s*dpr); canvas.height=Math.round(HEIGHT*s*dpr);
+  ctx.setTransform(canvas.width/WIDTH,0,0,canvas.height/HEIGHT,0,0);
+  draw();
+}
+window.addEventListener('resize',resize);
+
+canvas.addEventListener('pointerdown',function(e){
+  if(e.pointerType==='mouse'&&e.button!==0) return;
+  e.preventDefault();
+  var ac=getAC(); if(ac&&ac.state==='suspended') ac.resume();
+  var r=canvas.getBoundingClientRect();
+  var x=(e.clientX-r.left)*WIDTH/r.width, y=(e.clientY-r.top)*HEIGHT/r.height;
+  onCanvasClick(x,y);
+});
+canvas.addEventListener('contextmenu',function(e){e.preventDefault();});
+
+resize();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Boba Tea Barista - Custom Assets Edition</title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0b1020;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;
+    overscroll-behavior:none;touch-action:none;font-family:Arial,Helvetica,sans-serif}
+  #stage{position:fixed;left:0;top:0;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;background:#0f172a;touch-action:none;outline:none}
+  .corner{position:fixed;z-index:5;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;
+    color:#cbd5e1;font:bold 13px Arial,sans-serif;text-decoration:none;opacity:.6;background:transparent;border:0;padding:0 8px;cursor:pointer}
+  .corner:hover{opacity:1}
+  #back{left:calc(env(safe-area-inset-left,0px) + 2px);top:calc(env(safe-area-inset-top,0px) + 2px)}
+  #fs{right:calc(env(safe-area-inset-right,0px) + 2px);top:calc(env(safe-area-inset-top,0px) + 2px);font-size:20px}
+  #rot{position:fixed;z-index:4;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 6px);transform:translateX(-50%);display:none;
+    background:rgba(15,23,42,.85);color:#e2e8f0;font:12px Arial,sans-serif;padding:6px 12px;border-radius:14px;pointer-events:none;white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c" width="1400" height="1500"></canvas></div>
+<a id="back" class="corner" href="../../index.html">&larr; Back</a>
+<button id="fs" class="corner" aria-label="Toggle fullscreen">&#x26F6;</button>
+<div id="rot">Tip: this game plays best in portrait &#x21BB;</div>
+<script>
+(function(){
+"use strict";
+const WIDTH=700, HEIGHT=750, GAME_FPS=30, S=2;
+const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+ctx.scale(S,S);
+
+const ASSET_CONFIG={
+  background:{file:"shop_bg.png",size:[700,750]},
+  cup_small:{file:"cup_small.png",size:[130,150]},
+  cup_medium:{file:"cup_medium.png",size:[150,180]},
+  cup_large:{file:"cup_large.png",size:[170,210]},
+  tea_black:{file:"tea_black.png",size:[150,180]},
+  tea_green:{file:"tea_green.png",size:[150,180]},
+  tea_taro:{file:"tea_taro.png",size:[150,180]},
+  topping_boba:{file:"boba.png",size:[24,24]},
+  topping_jelly:{file:"jelly.png",size:[24,24]},
+  topping_pudding:{file:"pudding.png",size:[24,24]},
+  ice:{file:"ice_cubes.png",size:[28,28]}
+};
+const CUSTOM_SOUNDS={pour:"pour.mp3",add_topping:"pop.mp3",serve_success:"success.mp3",serve_fail:"error.mp3",clear:"clear.mp3"};
+const CUP_SIZES={"Small":130,"Medium":160,"Large":190};
+const TEA_FLAVORS={
+  "Black Milk Tea":{color:"#d97706",image_key:"tea_black"},
+  "Green Tea":{color:"#84cc16",image_key:"tea_green"},
+  "Taro Tea":{color:"#c084fc",image_key:"tea_taro"}};
+const ICE_LEVELS=["No Ice","Low Ice","Regular Ice"];
+const TOPPING_DATA={
+  "Boba":{color:"#18181b",image_key:"topping_boba"},
+  "Grass Jelly":{color:"#09090b",image_key:"topping_jelly"},
+  "Egg Pudding":{color:"#fef08a",image_key:"topping_pudding"}};
+
+/* ---------- images ---------- */
+const images={};
+for(const k in ASSET_CONFIG){
+  images[k]=null;
+  const im=new Image();
+  im.onload=()=>{ if(im.naturalWidth>0) images[k]=im; };
+  im.onerror=()=>{ images[k]=null; };
+  im.src=ASSET_CONFIG[k].file;
+}
+function drawSprite(key,cx,cy){
+  const im=images[key]; if(!im) return false;
+  const [w,h]=ASSET_CONFIG[key].size;
+  ctx.drawImage(im,cx-w/2,cy-h/2,w,h); return true;
+}
+
+/* ---------- audio ---------- */
+let actx=null;
+const sfx={};
+for(const k in CUSTOM_SOUNDS){
+  try{
+    const a=new Audio(); a.preload='auto';
+    sfx[k]={el:a,ok:false};
+    a.addEventListener('canplaythrough',()=>{sfx[k].ok=true;},{once:true});
+    a.addEventListener('error',()=>{sfx[k].ok=false;});
+    a.src=CUSTOM_SOUNDS[k];
+  }catch(e){}
+}
+function unlockAudio(){
+  try{
+    if(!actx){ const AC=window.AudioContext||window.webkitAudioContext; if(AC) actx=new AC(); }
+    if(actx&&actx.state==='suspended') actx.resume();
+  }catch(e){}
+}
+const BEEP={pour:400,add_topping:700,serve_success:950,serve_fail:220,clear:300};
+function beep(t){
+  try{
+    if(!actx||actx.state!=='running') return;
+    const o=actx.createOscillator(), g=actx.createGain();
+    o.frequency.value=BEEP[t]||400; o.type='square';
+    g.gain.value=0.04; o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime+0.05);
+  }catch(e){}
+}
+function playSound(t){
+  const s=sfx[t];
+  if(s&&s.ok){
+    try{ const n=s.el.cloneNode(); n.play().catch(()=>beep(t)); return; }catch(e){}
+  }
+  beep(t);
+}
+
+/* ---------- game ---------- */
+const cup_x=Math.floor(WIDTH/2), cup_base_y=440;
+let score=0, orders_completed=0, is_vip=false, time_left=25;
+let high_score=0;
+try{ const v=parseInt(localStorage.getItem('bobateashope_highscore'),10); if(!isNaN(v)) high_score=v; }catch(e){}
+function saveHigh(){ try{ localStorage.setItem('bobateashope_highscore',String(high_score)); }catch(e){} }
+let last_timer_update=performance.now();
+let current_order={}, user_cup={};
+let buttons=[];
+let frozenUntil=0;
+
+const ri=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
+const choice=a=>a[Math.floor(Math.random()*a.length)];
+function sample(a,n){ const c=a.slice(), r=[]; while(n--&&c.length){ r.push(c.splice(Math.floor(Math.random()*c.length),1)[0]); } return r; }
+
+function generate_new_order(){
+  const size=choice(Object.keys(CUP_SIZES)), tea=choice(Object.keys(TEA_FLAVORS)), ice=choice(ICE_LEVELS);
+  const n=choice([1,2]);
+  const toppings=sample(Object.keys(TOPPING_DATA),n);
+  is_vip=Math.random()<0.30;
+  time_left=is_vip?18:25;
+  current_order={size,tea,ice,toppings};
+  reset_cup(true);
+}
+function reset_cup(silent){
+  user_cup={size:null,tea:null,ice:null,toppings:[],topping_positions:[]};
+  if(!silent) playSound("clear");
+}
+function set_size(s){ user_cup.size=s; playSound("pour"); }
+function set_tea(t){ if(!user_cup.size){show_feedback("PICK A CUP SIZE FIRST!","#ef4444");return;} user_cup.tea=t; playSound("pour"); }
+function set_ice(i){ if(!user_cup.size){show_feedback("PICK A CUP SIZE FIRST!","#ef4444");return;} user_cup.ice=i; playSound("add_topping"); }
+function add_topping(t){
+  if(!user_cup.size){show_feedback("PICK A CUP SIZE FIRST!","#ef4444");return;}
+  if(user_cup.toppings.length>=4){show_feedback("CUP FULL!","#eab308");return;}
+  user_cup.toppings.push(t);
+  const cup_h=CUP_SIZES[user_cup.size];
+  const px=cup_x+ri(-35,35);
+  const py=(cup_base_y-15)-ri(10,Math.min(60,cup_h-40));
+  user_cup.topping_positions.push([t,px,py]);
+  playSound("add_topping");
+}
+function setEq(a,b){ const A=new Set(a),B=new Set(b); if(A.size!==B.size) return false; for(const x of A) if(!B.has(x)) return false; return true; }
+function serve_boba(){
+  const o=current_order,c=user_cup;
+  if(c.size===o.size&&c.tea===o.tea&&c.ice===o.ice&&setEq(c.toppings,o.toppings)){
+    const time_bonus=Math.trunc(time_left*5);
+    const base=150+time_bonus;
+    const earned=is_vip?base*2:base;
+    score+=earned; orders_completed++;
+    if(score>high_score){ high_score=score; saveHigh(); }
+    playSound("serve_success");
+    show_feedback(is_vip?`VIP DELIGHT! +${earned} PTS (2X)`:`DELICIOUS! +${earned} PTS`, is_vip?"#eab308":"#22c55e");
+  }else{
+    score=Math.max(0,score-50);
+    playSound("serve_fail");
+    show_feedback("WRONG RECIPE! -50 PTS","#ef4444");
+  }
+  generate_new_order();
+}
+/* Original blocks the UI for 600 ms with the box drawn over the last frame. */
+function show_feedback(text,color){
+  ctx.fillStyle="#0f172a"; ctx.fillRect(WIDTH/2-170,210,340,40);
+  ctx.strokeStyle=color; ctx.lineWidth=2; ctx.strokeRect(WIDTH/2-170,210,340,40);
+  txt(WIDTH/2,230,text,12,color);
+  frozenUntil=performance.now()+600;
+}
+function game_loop(){
+  const now=performance.now();
+  if(now-last_timer_update>=1000){
+    last_timer_update=now; time_left-=1;
+    if(time_left<=0){
+      playSound("serve_fail");
+      const pen=is_vip?60:30;
+      score=Math.max(0,score-pen);
+      show_feedback(is_vip?"VIP LEFT ANGRY! -60 PTS":"CUSTOMER LEFT! -30 PTS","#ef4444");
+      generate_new_order();
+      return; // frozen; next draw happens after the pause
+    }
+  }
+  draw_screen();
+}
+
+/* ---------- drawing ---------- */
+const PX=96/72;
+function txt(x,y,s,pt,color){
+  ctx.font=`bold ${(pt*PX).toFixed(2)}px Arial, Helvetica, sans-serif`;
+  ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillStyle=color; ctx.fillText(s,x,y);
+}
+function rect(x1,y1,x2,y2,fill,outline,w){
+  if(fill){ ctx.fillStyle=fill; ctx.fillRect(x1,y1,x2-x1,y2-y1); }
+  if(outline){ ctx.strokeStyle=outline; ctx.lineWidth=w||1; ctx.strokeRect(x1,y1,x2-x1,y2-y1); }
+}
+function mkBtn(x1,y1,x2,y2,cb){ buttons.push({x1,y1,x2,y2,callback:cb}); }
+const fl2=Math.floor;
+
+function draw_screen(){
+  ctx.clearRect(0,0,WIDTH,HEIGHT);
+  buttons=[];
+  // 1 background
+  if(images.background) drawSprite("background",WIDTH/2,HEIGHT/2);
+  else rect(0,0,WIDTH,HEIGHT,"#1e1b4b");
+  // 2 HUD
+  rect(0,0,WIDTH,50,"#0f172a");
+  txt(80,25,`SERVED: ${orders_completed}`,11,"#ffffff");
+  txt(WIDTH/2,25,`HIGH SCORE: ${high_score}`,12,"#f59e0b");
+  txt(WIDTH-90,25,`SCORE: ${score}`,13,"#facc15");
+  // 3 order ticket
+  const card_bg=is_vip?"#fefce8":"#ffffff", card_stroke=is_vip?"#eab308":"#38bdf8";
+  const hdr_bg=is_vip?"#ca8a04":"#0284c7";
+  const hdr_title=is_vip?"⭐ VIP CUSTOMER ORDER (2X POINTS) ⭐":"CUSTOMER ORDER";
+  rect(20,60,WIDTH-20,165,card_bg,card_stroke,is_vip?4:3);
+  rect(20,60,WIDTH-20,90,hdr_bg);
+  txt(WIDTH/2,75,hdr_title,11,"#ffffff");
+  const max_time=is_vip?18:25;
+  const ratio=Math.max(0,time_left/max_time);
+  const bar=ratio>0.4?"#22c55e":(ratio>0.2?"#eab308":"#ef4444");
+  rect(WIDTH-150,70,WIDTH-30,82,"#334155");
+  rect(WIDTH-150,70,WIDTH-150+Math.trunc(120*ratio),82,bar);
+  txt(WIDTH/2,112,`Size: ${current_order.size}   |   Tea: ${current_order.tea}   |   Ice: ${current_order.ice}`,11,"#0f172a");
+  txt(WIDTH/2,140,"Toppings: "+current_order.toppings.join(", "),12,hdr_bg);
+  // 4 counter
+  rect(80,cup_base_y,WIDTH-80,cup_base_y+20,"#475569","#0f172a",2);
+  // 5 cup
+  if(user_cup.size){
+    const cup_h=CUP_SIZES[user_cup.size];
+    const cup_w=user_cup.size==="Small"?110:(user_cup.size==="Medium"?130:150);
+    const top_y=cup_base_y-cup_h;
+    const cupKey="cup_"+user_cup.size.toLowerCase();
+    if(user_cup.tea){
+      const ti=TEA_FLAVORS[user_cup.tea];
+      if(!drawSprite(ti.image_key,cup_x,cup_base_y-fl2(cup_h/2)))
+        rect(cup_x-fl2(cup_w/2)+6,top_y+15,cup_x+fl2(cup_w/2)-6,cup_base_y-4,ti.color);
+    }
+    if(user_cup.ice==="Low Ice"||user_cup.ice==="Regular Ice"){
+      const count=user_cup.ice==="Low Ice"?3:6;
+      for(let i=0;i<count;i++){
+        const ix=cup_x+(-30+(i*18)%60), iy=top_y+35+((i*12)%40);
+        if(!drawSprite("ice",ix,iy)) rect(ix-8,iy-8,ix+8,iy+8,"#e0f2fe","#38bdf8",1);
+      }
+    }
+    for(const [tn,px,py] of user_cup.topping_positions){
+      const td=TOPPING_DATA[tn];
+      if(!drawSprite(td.image_key,px,py)){
+        ctx.beginPath(); ctx.arc(px,py,7,0,Math.PI*2); ctx.fillStyle=td.color; ctx.fill();
+        ctx.strokeStyle="#ffffff"; ctx.lineWidth=1; ctx.stroke();
+      }
+    }
+    if(!drawSprite(cupKey,cup_x,cup_base_y-fl2(cup_h/2))){
+      ctx.strokeStyle="#ef4444"; ctx.lineWidth=8; ctx.lineCap="butt";
+      ctx.beginPath(); ctx.moveTo(cup_x+15,top_y-30); ctx.lineTo(cup_x-10,cup_base_y-10); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cup_x-fl2(cup_w/2),top_y); ctx.lineTo(cup_x+fl2(cup_w/2),top_y);
+      ctx.lineTo(cup_x+fl2(cup_w/2)-15,cup_base_y); ctx.lineTo(cup_x-fl2(cup_w/2)+15,cup_base_y);
+      ctx.closePath(); ctx.strokeStyle="#ffffff"; ctx.lineWidth=4; ctx.lineJoin="miter"; ctx.stroke();
+    }
+  }
+  // 6 dashboard
+  const dash_y=480;
+  txt(90,dash_y+15,"1. SELECT SIZE",10,"#94a3b8");
+  Object.keys(CUP_SIZES).forEach((sz,i)=>{
+    const bx1=30+i*75, by1=dash_y+30, bx2=bx1+65, by2=by1+35, active=user_cup.size===sz;
+    rect(bx1,by1,bx2,by2,active?"#0284c7":"#334155",active?"#ffffff":null,2);
+    txt(fl2((bx1+bx2)/2),fl2((by1+by2)/2),sz,9,"#ffffff");
+    mkBtn(bx1,by1,bx2,by2,()=>set_size(sz));
+  });
+  txt(320,dash_y+15,"2. SELECT TEA FLAVOR",10,"#94a3b8");
+  Object.keys(TEA_FLAVORS).forEach((t,i)=>{
+    const bx1=260+i*140, by1=dash_y+30, bx2=bx1+130, by2=by1+35, active=user_cup.tea===t;
+    rect(bx1,by1,bx2,by2,active?TEA_FLAVORS[t].color:"#334155",active?"#ffffff":null,2);
+    txt(fl2((bx1+bx2)/2),fl2((by1+by2)/2),t,9,"#ffffff");
+    mkBtn(bx1,by1,bx2,by2,()=>set_tea(t));
+  });
+  txt(90,dash_y+85,"3. ICE LEVEL",10,"#94a3b8");
+  ICE_LEVELS.forEach((ic,i)=>{
+    const bx1=30+i*75, by1=dash_y+100, bx2=bx1+65, by2=by1+35, active=user_cup.ice===ic;
+    rect(bx1,by1,bx2,by2,active?"#0369a1":"#334155",active?"#ffffff":null,2);
+    txt(fl2((bx1+bx2)/2),fl2((by1+by2)/2),ic,8,"#ffffff");
+    mkBtn(bx1,by1,bx2,by2,()=>set_ice(ic));
+  });
+  txt(320,dash_y+85,"4. ADD TOPPINGS",10,"#94a3b8");
+  Object.keys(TOPPING_DATA).forEach((tp,i)=>{
+    const bx1=260+i*140, by1=dash_y+100, bx2=bx1+130, by2=by1+35;
+    rect(bx1,by1,bx2,by2,"#334155","#64748b",2);
+    txt(fl2((bx1+bx2)/2),fl2((by1+by2)/2),`+ ${tp}`,9,"#ffffff");
+    mkBtn(bx1,by1,bx2,by2,()=>add_topping(tp));
+  });
+  // 7 actions
+  rect(WIDTH/2+20,680,WIDTH/2+200,730,"#22c55e","#ffffff",2);
+  txt(WIDTH/2+110,705,"SERVE DRINK",13,"#ffffff");
+  mkBtn(WIDTH/2+20,680,WIDTH/2+200,730,serve_boba);
+  rect(WIDTH/2-200,680,WIDTH/2-20,730,"#ef4444","#ffffff",2);
+  txt(WIDTH/2-110,705,"TRASH CUP",13,"#ffffff");
+  mkBtn(WIDTH/2-200,680,WIDTH/2-20,730,()=>reset_cup(false));
+}
+
+/* ---------- input ---------- */
+function on_click(x,y,touch){
+  for(const b of buttons){
+    if(b.x1<=x&&x<=b.x2&&b.y1<=y&&y<=b.y2){ b.callback(); return; }
+  }
+  if(touch){ // forgiving touch targets: nearest button within 22 logical px
+    let best=null,bd=22;
+    for(const b of buttons){
+      const dx=Math.max(b.x1-x,0,x-b.x2), dy=Math.max(b.y1-y,0,y-b.y2);
+      const d=Math.hypot(dx,dy);
+      if(d<bd){bd=d;best=b;}
+    }
+    if(best) best.callback();
+  }
+}
+canvas.addEventListener('pointerdown',e=>{
+  e.preventDefault(); unlockAudio();
+  if(e.pointerType==='mouse'&&e.button!==0) return;
+  if(performance.now()<frozenUntil) return;
+  const r=canvas.getBoundingClientRect();
+  const x=(e.clientX-r.left)*WIDTH/r.width, y=(e.clientY-r.top)*HEIGHT/r.height;
+  on_click(x,y,e.pointerType!=='mouse');
+  // redraw immediately so feedback/state shows without waiting for the next tick
+},{passive:false});
+document.addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('selectstart',e=>e.preventDefault());
+document.addEventListener('dragstart',e=>e.preventDefault());
+document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+window.addEventListener('keydown',unlockAudio,{once:true});
+
+/* ---------- layout ---------- */
+const stage=document.getElementById('stage'), rot=document.getElementById('rot');
+function layout(){
+  const vv=window.visualViewport;
+  const W=Math.floor(vv?vv.width:window.innerWidth), H=Math.floor(vv?vv.height:window.innerHeight);
+  stage.style.width=W+'px'; stage.style.height=H+'px';
+  const s=Math.min(W/WIDTH,H/HEIGHT);
+  canvas.style.width=Math.floor(WIDTH*s)+'px'; canvas.style.height=Math.floor(HEIGHT*s)+'px';
+  const coarse=window.matchMedia('(pointer:coarse)').matches;
+  rot.style.display=(coarse&&W>H)?'block':'none';
+}
+window.addEventListener('resize',layout);
+window.addEventListener('orientationchange',()=>setTimeout(layout,150));
+if(window.visualViewport) window.visualViewport.addEventListener('resize',layout);
+layout();
+
+/* fullscreen */
+const fs=document.getElementById('fs');
+fs.addEventListener('click',()=>{
+  try{
+    const d=document, el=d.documentElement;
+    if(d.fullscreenElement||d.webkitFullscreenElement){ (d.exitFullscreen||d.webkitExitFullscreen).call(d); }
+    else{ const p=(el.requestFullscreen||el.webkitRequestFullscreen).call(el); if(p&&p.catch) p.catch(()=>{}); }
+  }catch(e){}
+});
+fs.addEventListener('pointerdown',e=>e.stopPropagation());
+
+/* ---------- fixed timestep loop (30 ms) ---------- */
+generate_new_order();
+let last=performance.now(), acc=0;
+function frame(t){
+  const dt=Math.min(t-last,250); last=t; acc+=dt;
+  while(acc>=GAME_FPS){
+    acc-=GAME_FPS;
+    if(performance.now()<frozenUntil) continue;
+    game_loop();
+  }
+  requestAnimationFrame(frame);
+}
+draw_screen();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
