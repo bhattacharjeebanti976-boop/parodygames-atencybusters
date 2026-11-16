@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#2338ff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>Parody Games</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;600;700&display=swap">
+<style>
+/* Layout: poster-style header on a flat blue ground, then a one-column (phone) to three-column (desktop) wall of outlined game cards, then a UPI tip panel. Single committed light-on-blue look. */
+:root{
+  --ground:#2338ff;
+  --paper:#ffffff;
+  --ink:#111111;
+  --hit:#ffe14a;
+  --soft:#e9ecff;
+  --font-display:"Archivo Black","Arial Black",Impact,sans-serif;
+  --font-body:"Archivo","Segoe UI",Roboto,system-ui,sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{background:var(--ground)}
+body{
+  margin:0;background:var(--ground);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.45;
+  padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));
+  padding-block:0 40px;
+}
+.wrap{max-width:1120px;margin:0 auto}
+header{padding-block:28px 32px;color:var(--paper)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.studio{margin:0;font-weight:700;font-size:.8rem;letter-spacing:.14em;text-transform:uppercase}
+h1{font-family:var(--font-display);font-weight:400;font-size:clamp(3rem,13vw,7.5rem);line-height:.88;margin:28px 0 18px;letter-spacing:-.02em;text-transform:uppercase}
+h1 span{color:var(--hit)}
+.lead{max-width:44ch;margin:0;font-size:1.1rem}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;padding:0 20px;
+  background:var(--hit);color:var(--ink);border:3px solid var(--ink);border-radius:0;box-shadow:4px 4px 0 var(--ink);
+  font:700 1rem var(--font-body);text-decoration:none;cursor:pointer;
+}
+.btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--ink)}
+.btn:focus-visible,.card:focus-visible,.chip:focus-visible{outline:3px solid var(--paper);outline-offset:3px}
+.btn svg{width:22px;height:22px;flex:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:22px;margin:0;padding:0;list-style:none}
+.grid>li{display:flex;min-width:0}
+.card{
+  flex:1;display:flex;flex-direction:column;min-width:0;background:var(--paper);color:var(--ink);text-decoration:none;
+  border:3px solid var(--ink);box-shadow:6px 6px 0 var(--ink);
+}
+.card:active{transform:translate(4px,4px);box-shadow:2px 2px 0 var(--ink)}
+.card img{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;background:var(--ink);border-bottom:3px solid var(--ink)}
+.info{display:flex;flex-direction:column;gap:8px;padding:14px 16px 16px;flex:1}
+.card h2{font-family:var(--font-display);font-weight:400;font-size:1.35rem;line-height:1.1;margin:0;text-transform:uppercase}
+.card p{margin:0;font-size:.95rem}
+.ctl{margin-top:auto!important;padding-top:6px;font-size:.82rem!important;color:#444}
+.ctl span::before{content:"Controls  ";font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size:.72rem}
+.ctl em{display:block;font-style:normal;font-weight:700;color:var(--ground)}
+.play{margin-top:6px;align-self:stretch;text-align:center;background:var(--ink);color:var(--paper);font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:13px 0;font-size:.9rem}
+.card:hover .play{background:var(--ground)}
+.coffee{margin-top:48px;background:var(--hit);border:3px solid var(--ink);box-shadow:6px 6px 0 var(--ink);padding:22px 20px;display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center}
+.coffee h2{font-family:var(--font-display);font-weight:400;font-size:clamp(1.6rem,6vw,2.4rem);line-height:1;margin:0 0 10px;text-transform:uppercase}
+.coffee p{margin:0 0 14px;max-width:46ch}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.chip{min-height:44px;padding:0 16px;background:var(--paper);color:var(--ink);border:3px solid var(--ink);font:700 .95rem var(--font-body);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--hit)}
+.actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn.alt{background:var(--paper)}
+.coffee .upi{margin:18px 0 0;font-size:.9rem;word-break:break-all}
+.upi code{font:700 .95rem ui-monospace,Menlo,Consolas,monospace;background:var(--paper);border:2px solid var(--ink);padding:2px 8px}
+.qr{background:#fff;border:3px solid var(--ink);padding:10px;width:180px;height:180px;display:grid;place-items:center}
+.qr img,.qr canvas{display:block;max-width:100%;height:auto}
+.qr small{font-size:.75rem;text-align:center}
+.status{min-height:1.2em;font-size:.85rem;font-weight:700;margin-top:8px}
+footer{margin-top:36px;color:var(--paper);font-size:.85rem;font-weight:600}
+@media (max-width:640px){
+  .coffee{grid-template-columns:1fr}
+  .qr{display:none}
+  .btn{width:100%}
+  .top .btn{width:auto}
+}
+@media (hover:none){.card:hover .play{background:var(--ink)}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="top">
+      <p class="studio">Latency Busters Studios</p>
+      <a class="btn coffee-link" href="#coffee"><svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V9z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H17"/><path d="M8 3v3M12 3v3"/></svg>Buy me a coffee</a>
+    </div>
+    <h1>Parody<br><span>Games</span></h1>
+    <p class="lead">10 games you can play right here. Open one on your phone or computer and start. Nothing to install.</p>
+  </header>
+
+  <main>
+    <ul class="grid">
+    <li><a class="card" href="games/flappykoustav/index.html" aria-label="Play Flappy Koustav">
+      <img src="games/flappykoustav/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>Flappy Koustav</h2>
+        <p>Tap to flap through the pipes. Classic, rude, and hard to put down.</p>
+        <p class="ctl"><span>Tap or Space</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/pantichorpikai/index.html" aria-label="Play Panti Chor Pikai">
+      <img src="games/pantichorpikai/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>Panti Chor Pikai</h2>
+        <p>Catch the falling pantis for +10 points. Every bomb you touch costs HP.</p>
+        <p class="ctl"><span>Mouse or A/D, arrow buttons on phone</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/catcutter/index.html" aria-label="Play Cat Cutter">
+      <img src="games/catcutter/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>Cat Cutter</h2>
+        <p>Slice through the targets as fast as they fly across the screen.</p>
+        <p class="ctl"><span>Swipe or drag to slash</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/zombiehunt/index.html" aria-label="Play 2D Zombie Survival">
+      <img src="games/zombiehunt/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>2D Zombie Survival</h2>
+        <p>Top-down wave shooter. Zombies, runners, spitters and tanks against your pistol, shotgun, rifle and laser.</p>
+        <p class="ctl"><span>WASD + mouse, on-screen stick on phone</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/bobateashope/index.html" aria-label="Play Boba Tea Barista">
+      <img src="games/bobateashope/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>Boba Tea Barista</h2>
+        <p>Read the order, build the drink with the right size, tea, ice and toppings, then serve it.</p>
+        <p class="ctl"><span>Tap or drag ingredients</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/subhronilhiter/index.html" aria-label="Play Whack-a-Mole">
+      <img src="games/subhronilhiter/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>Whack-a-Mole</h2>
+        <p>30 seconds, nine holes, and a mole that stays up for 800 ms.</p>
+        <p class="ctl"><span>Tap the mole</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/spaceamit/index.html" aria-label="Play Space Invaders">
+      <img src="games/spaceamit/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>Space Invaders</h2>
+        <p>Shoot down wave after wave of invaders before they reach you.</p>
+        <p class="ctl"><span>Arrows + Space, on-screen buttons on phone</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/break/index.html" aria-label="Play Desktop Destroyer">
+      <img src="games/break/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>Desktop Destroyer</h2>
+        <p>Squash the bugs crawling over a fake desktop and smash whatever is in the way.</p>
+        <p class="ctl"><span>Tap or click</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/stickmanwar/index.html" aria-label="Play Stickman 1v1 Fighting Arena">
+      <img src="games/stickmanwar/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>Stickman 1v1 Fighting Arena</h2>
+        <p>Pick a fighter, then punch, kick and fire your special against the AI or a friend.</p>
+        <p class="ctl"><span>A/D W F G H, touch buttons on screen</span></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    <li><a class="card" href="games/laddowarrior/index.html" aria-label="Play LadooWarrior 3D">
+      <img src="games/laddowarrior/thumb.png" alt="" width="800" height="450" loading="lazy">
+      <div class="info">
+        <h2>LadooWarrior 3D</h2>
+        <p>First-person fights in a sand arena. Move, aim and attack round after round.</p>
+        <p class="ctl"><span>Stick + attack buttons (landscape)</span><em>Best in landscape</em></p>
+        <span class="play">Play now</span>
+      </div>
+    </a></li>
+    </ul>
+
+    <section class="coffee" id="coffee" aria-labelledby="coffee-h">
+      <div>
+        <h2 id="coffee-h">Buy me a coffee</h2>
+        <p>These games are free. If one made you laugh or rage, a small UPI tip keeps the next one coming.</p>
+        <div class="chips" role="group" aria-label="Tip amount">
+          <button class="chip" type="button" data-amt="20" aria-pressed="false">₹20</button>
+          <button class="chip" type="button" data-amt="50" aria-pressed="true">₹50</button>
+          <button class="chip" type="button" data-amt="100" aria-pressed="false">₹100</button>
+          <button class="chip" type="button" data-amt="" aria-pressed="false">Any amount</button>
+        </div>
+        <div class="actions">
+          <a class="btn" id="payBtn" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V9z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H17"/><path d="M8 3v3M12 3v3"/></svg>Pay with UPI app</a>
+          <button class="btn alt" id="copyBtn" type="button">Copy UPI ID</button>
+        </div>
+        <p class="upi">UPI ID: <code id="upiId">7001536469@fam</code></p>
+        <p class="status" id="status" role="status"></p>
+      </div>
+      <div class="qr" id="qr" aria-label="UPI QR code"><small>QR code loads here</small></div>
+    </section>
+  </main>
+
+  <footer>© Latency Busters Studios</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+(function(){
+  var VPA="7001536469@fam", NAME="Latency Busters Studios";
+  var amt="50";
+  var pay=document.getElementById("payBtn"), status=document.getElementById("status"), qrBox=document.getElementById("qr");
+  function link(){
+    var u="upi://pay?pa="+encodeURIComponent(VPA)+"&pn="+encodeURIComponent(NAME)+"&cu=INR&tn="+encodeURIComponent("Coffee for Parody Games");
+    if(amt) u+="&am="+amt;
+    return u;
+  }
+  function render(){
+    pay.href=link();
+    qrBox.innerHTML="";
+    try{ new QRCode(qrBox,{text:link(),width:160,height:160,correctLevel:QRCode.CorrectLevel.M}); }
+    catch(e){ qrBox.innerHTML="<small>Scan not available. Use the UPI ID.</small>"; }
+  }
+  document.querySelectorAll(".chip").forEach(function(c){
+    c.addEventListener("click",function(){
+      amt=c.getAttribute("data-amt");
+      document.querySelectorAll(".chip").forEach(function(x){x.setAttribute("aria-pressed",x===c?"true":"false");});
+      render();
+    });
+  });
+  document.getElementById("copyBtn").addEventListener("click",function(){
+    function ok(){status.textContent="Copied "+VPA;}
+    function fail(){
+      var r=document.createRange();r.selectNodeContents(document.getElementById("upiId"));
+      var s=window.getSelection();s.removeAllRanges();s.addRange(r);status.textContent="Press and hold the ID to copy it.";
+    }
+    try{ navigator.clipboard.writeText(VPA).then(ok,fail); }catch(e){ fail(); }
+  });
+  pay.addEventListener("click",function(){
+    setTimeout(function(){status.textContent="If nothing opened, scan the QR code or copy the UPI ID.";},1200);
+  });
+  render();
+})();
+</script>
+</body>
+</html>
